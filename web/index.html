@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ITECH 测试台 · IT6302 + IT8511A+</title>
+<link rel="stylesheet" href="style.css?v=55">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="logo">IT</div>
+    <div>
+      <h1>ITECH 测试台</h1>
+      <p>IT6302 三路直流电源 · IT8511A+ 电子负载</p>
+    </div>
+  </div>
+
+  <div class="status-group" id="pills"></div>
+
+  <button id="estop">急停 · 全部关断</button>
+</header>
+
+<div class="shell">
+
+  <!-- ==================== 左栏：仪器控制台 ==================== -->
+  <aside class="panel sidebar">
+    <h2 class="side-title">仪器</h2>
+
+    <div class="dev-list" id="dev-list"></div>
+
+    <button type="button" class="dev-add" id="add-inst" title="向清单添加一台仪器">＋ 添加仪器</button>
+
+    <div class="dev-sep"><span>联动</span></div>
+
+    <div class="dev-list">
+      <button type="button" class="dev" data-role="sweep">
+        <span class="dev-ico ico-iv">IV</span>
+        <span class="dev-txt">
+          <b>联动测试</b>
+          <em>电源 + 负载 · 扫描</em>
+        </span>
+        <span class="dev-state"><i class="dot"></i><s>就绪</s></span>
+      </button>
+    </div>
+
+    <!-- 单台仪器：连接设置 -->
+    <div class="dev-cfg" id="dev-cfg">
+      <div class="cfg-title" id="cfg-title">直流电源 · 连接设置</div>
+
+      <label class="field" id="dev-model-field" style="display:none">
+        <span>仪器型号</span>
+        <select id="dev-model"></select>
+      </label>
+
+      <label class="field">
+        <span>串口</span>
+        <select id="dev-port"></select>
+      </label>
+
+      <div class="row">
+        <label class="field" style="margin:0">
+          <span>波特率</span>
+          <select id="dev-baud">
+            <option value="9600">9600</option>
+            <option value="4800">4800</option>
+            <option value="38400">38400</option>
+            <option value="115200">115200</option>
+          </select>
+        </label>
+        <div class="cfg-btns">
+          <button id="dev-connect" class="primary">连接</button>
+          <button id="dev-disconnect" class="ghost">断开</button>
+        </div>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="sim-mode">
+        <span>模拟模式（无硬件演示）</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="safe-start" checked>
+        <span>连接后先关断输出</span>
+      </label>
+
+      <div class="row" style="margin-top:11px">
+        <button id="refresh-ports" class="ghost tiny">刷新端口</button>
+        <button id="selftest" class="ghost tiny">通信自检</button>
+      </div>
+    </div>
+
+    <!-- 联动测试：两台状态清单 -->
+    <div class="dev-cfg link-cfg" id="link-cfg" style="display:none">
+      <div class="cfg-title">联动测试 · 前置条件</div>
+
+      <div id="link-rows"></div>
+
+      <p class="hint">
+        扫描需要两台同时在线：电源提供激励，负载拉载并回读。<br>
+        两台都在线后，右侧即可开始。
+      </p>
+    </div>
+
+    <p class="hint" id="ttl-hint">
+      DB9 口为 <b>TTL 电平</b>，需经 IT-E121/E122 转接模块接电脑，<b>切勿直连串口</b>。
+    </p>
+
+    <div class="side-foot">
+      <button id="log-open" class="log-btn">
+        <span>运行日志</span>
+        <b id="log-badge">0</b>
+      </button>
+      <div class="badges">
+        <span class="badge" id="serial-badge">pyserial</span>
+        <span class="badge" id="buf-badge">缓存 0 点</span>
+      </div>
+      <button type="button" class="theme-toggle" id="theme-toggle" title="切换深色 / 浅色主题">☀️ 浅色</button>
+    </div>
+  </aside>
+
+  <!-- 左右栏宽度拖动条 -->
+  <div class="col-split" id="col-split" title="拖动调整左右栏宽度"></div>
+
+  <!-- ==================== 右栏：当前视图 ==================== -->
+  <main>
+
+    <!-- ---------- 视图：联动测试 ---------- -->
+    <section class="view" data-view="sweep">
+      <div class="panel vpanel">
+
+        <div class="view-head">
+          <h2>联动测试 <span class="model">电源 + 负载</span></h2>
+          <span class="badge" id="sweep-badge">就绪</span>
+          <div class="spacer"></div>
+          <button class="tiny ghost" id="sweep-csv" disabled>导出 CSV</button>
+        </div>
+
+        <div class="sweep-layout">
+
+          <div class="sweep-side">
+            <div class="sweep-form">
+              <label class="field">
+                <span>扫描方式</span>
+                <select id="sweep-type">
+                  <option value="load">负载电流扫描（电源恒压）</option>
+                  <option value="psu">电源电压扫描（负载恒流）</option>
+                </select>
+              </label>
+
+              <div class="sweep-row">
+                <label class="field">
+                  <span>电源设备</span>
+                  <select id="sweep-pdev"></select>
+                </label>
+                <label class="field">
+                  <span>负载设备</span>
+                  <select id="sweep-ldev"></select>
+                </label>
+              </div>
+
+              <div class="sweep-row">
+                <label class="field">
+                  <span>电源通道</span>
+                  <select id="sweep-ch"><option value="1">CH1</option><option value="2">CH2</option><option value="3">CH3</option></select>
+                </label>
+                <label class="field">
+                  <span>每步停留 (ms)</span>
+                  <input type="number" data-name="dwell_ms" value="300" step="50" min="50">
+                </label>
+              </div>
+
+              <div data-grp="load">
+                <div class="sweep-row">
+                  <label class="field"><span>电源电压 (V)</span><input type="number" data-name="v_fixed" value="5" step="0.1" min="0"></label>
+                  <label class="field"><span>电源限流 (A)</span><input type="number" data-name="i_limit" value="3" step="0.1" max="3"></label>
+                </div>
+                <div class="sweep-row">
+                  <label class="field"><span>起始电流 (A)</span><input type="number" data-name="start" value="0" step="0.05" min="0"></label>
+                  <label class="field"><span>终止电流 (A)</span><input type="number" data-name="end" value="3" step="0.05" min="0"></label>
+                </div>
+                <label class="field"><span>步进 (A)</span><input type="number" data-name="step" value="0.1" step="0.01" min="0.01"></label>
+              </div>
+
+              <div data-grp="psu" style="display:none">
+                <div class="sweep-row">
+                  <label class="field"><span>负载电流 (A)</span><input type="number" data-name="i_load" value="1" step="0.1" min="0"></label>
+                  <label class="field"><span>电源限流 (A)</span><input type="number" data-name="i_limit" value="3" step="0.1" max="3"></label>
+                </div>
+                <div class="sweep-row">
+                  <label class="field"><span>起始电压 (V)</span><input type="number" data-name="start" value="0" step="0.1" min="0"></label>
+                  <label class="field"><span>终止电压 (V)</span><input type="number" data-name="end" value="20" step="0.1" min="0"></label>
+                </div>
+                <label class="field"><span>步进 (V)</span><input type="number" data-name="step" value="0.5" step="0.1" min="0.01"></label>
+              </div>
+
+              <label class="check">
+                <input type="checkbox" id="sweep-safe" checked>
+                <span>结束后关闭输出</span>
+              </label>
+
+              <div class="row">
+                <button id="sweep-start" class="primary">开始扫描</button>
+                <button id="sweep-stop" disabled>停止</button>
+              </div>
+
+              <div class="progress"><i id="sweep-progress"></i></div>
+              <div class="progress-text" id="sweep-text">—</div>
+            </div>
+
+            <p class="hint" id="sweep-hint">
+              <b>负载电流扫描</b>：电源恒压，负载电流逐点加大，看电源的负载调整率与线缆压降。<br>
+              <b>电源电压扫描</b>：负载恒流，电源电压逐点抬升，看回路 I-V 特性。
+            </p>
+          </div>
+
+          <div class="sweep-chart">
+            <div class="sweep-chart-head">
+              <span class="ls"><i class="s-solid" style="border-top-color:#4f9cf9"></i>负载电压 V</span>
+              <span class="ls" id="sweep-ilg"><i class="s-dash" style="border-top-color:#2dd4bf"></i>负载电流 A</span>
+              <span class="ls" id="sweep-plg"><i class="s-dot" style="border-top-color:#f0a83c"></i>功率 W</span>
+              <div class="spacer"></div>
+              <span class="badge" id="sweep-src">横轴：负载电流 A</span>
+              <button class="tiny ghost" id="sweep-ptoggle" aria-pressed="false" title="右轴切换为功率">功率</button>
+            </div>
+            <div class="sweep-wrap">
+              <canvas id="sweepCanvas"></canvas>
+              <div class="empty-tip" id="sweep-tip">尚无扫描数据<br><span style="font-size:11px">连接电源与负载后点击「开始扫描」</span></div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ==================== 底部日志面板 ==================== -->
+<aside class="log-panel" id="log-panel">
+  <div class="log-head">
+    <h2>运行日志</h2>
+    <span class="badge" id="log-count">0</span>
+    <div class="spacer"></div>
+    <button class="close-btn" id="log-close" title="收起">×</button>
+  </div>
+  <div class="log-list" id="logList"></div>
+</aside>
+
+<div class="toast" id="toast"></div>
+
+<!-- ==================== 开始记录对话框 ==================== -->
+<div class="modal-mask" id="add-mask" style="display:none">
+  <div class="modal">
+    <h3>添加仪器</h3>
+    <label class="field">
+      <span>仪器类型</span>
+      <select id="add-type">
+        <option value="power">直流电源</option>
+        <option value="load">电子负载</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>型号</span>
+      <select id="add-model"></select>
+    </label>
+    <p class="hint" id="add-hint">添加后出现在左侧清单，在「连接设置」中选择串口连接。删除已连接的仪器会先自动断开。</p>
+    <div class="row">
+      <button class="ghost" id="add-cancel">取消</button>
+      <button class="primary" id="add-ok">添加</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="wire-mask" style="display:none">
+  <div class="modal wire-modal">
+    <h3 id="wire-title">组合输出 · 接线指引</h3>
+    <div id="wire-body"></div>
+    <div class="row">
+      <button class="ghost" id="wire-cancel">取消，不开启</button>
+      <button class="primary" id="wire-ok">已完成接线，开启输出</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="combooff-mask" style="display:none">
+  <div class="modal" style="max-width:420px">
+    <h3>通道被组合输出占用</h3>
+    <p id="combooff-msg" style="font-size:13px;line-height:1.7;margin:10px 2px"></p>
+    <div class="row">
+      <button class="ghost" id="combooff-cancel">取消</button>
+      <button class="primary" id="combooff-ok">关闭组合输出</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="rec-mask" style="display:none">
+  <div class="modal">
+    <h3 id="rec-title">开始记录</h3>
+    <div class="rec-mode-row" id="rec-mode-row">
+      <button type="button" class="rec-mode sel" data-m="single">单路</button>
+      <button type="button" class="rec-mode" data-m="multi">多路</button>
+      <span class="rec-mode-tip" id="rec-mode-tip">单路：只记录一个通道</span>
+    </div>
+    <div class="rec-chans" id="rec-chans"></div>
+    <label class="field">
+      <span>存储目录</span>
+      <input type="text" id="rec-dir" spellcheck="false" placeholder="相对程序目录或绝对路径，留空 = 程序目录">
+    </label>
+    <label class="field">
+      <span>文件名</span>
+      <div class="row" style="margin:0">
+        <input type="text" id="rec-path" spellcheck="false" style="flex:1 1 auto">
+        <button type="button" class="tiny ghost" id="rec-browse" style="display:none" title="打开系统目录选择">选择目录</button>
+      </div>
+    </label>
+    <label class="field">
+      <span>记录间隔</span>
+      <select id="rec-iv">
+        <option value="0.8">0.8 秒（最快，跟随界面）</option>
+        <option value="1">1 秒</option>
+        <option value="2">2 秒</option>
+        <option value="5">5 秒</option>
+        <option value="10">10 秒</option>
+        <option value="30">30 秒</option>
+        <option value="60">1 分钟</option>
+      </select>
+    </label>
+    <p class="hint">记录按所选间隔采样写出 CSV；间隔越大数据量越小。可同时存在多条记录。</p>
+    <div class="row">
+      <button class="ghost" id="rec-cancel">取消</button>
+      <button class="primary" id="rec-ok">确定开始</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=55"></script>
+</body>
+</html>

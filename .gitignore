@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# 打包产物（体积大，不入库）
+dist/
+build/
+
+# WorkBuddy 工作区数据
+.workbuddy/
+
+# 临时截图（tools 下的验证截图）
+tools/shot_*.png
+tools/crop_*.png

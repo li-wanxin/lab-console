@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>曲线展示方案对比 · ITECH 测试台</title>
+<style>
+  :root{
+    --bg:#0a0e13; --panel:#111821; --panel-2:#151d28; --line:#1e2836; --line-soft:#18212c;
+    --text:#e6eef7; --dim:#8fa0b3; --dim-2:#66788b;
+    --accent:#4f9cf9; --ok:#2dd4bf; --warn:#f0a83c;
+    --mono:"JetBrains Mono","Cascadia Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-size:13px;
+    background-image:radial-gradient(1100px 460px at 10% -12%,rgba(45,212,191,.06),transparent 62%),
+                     radial-gradient(900px 420px at 96% -4%,rgba(79,156,249,.06),transparent 62%);
+    padding:20px 22px 28px}
+  h1{font-size:17px;margin:0 0 4px;font-weight:600;letter-spacing:.2px}
+  .sub{color:var(--dim-2);font-size:12px;margin:0 0 16px;line-height:1.75;max-width:1100px}
+  .sub b{color:#b9cbdd;font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;max-width:1250px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px 14px 11px;
+        display:flex;flex-direction:column;min-width:0;position:relative}
+  .card.pick{border-color:#2b5a86;box-shadow:0 0 0 1px rgba(79,156,249,.18),0 10px 30px -20px rgba(79,156,249,.6)}
+  .ch-head{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+  .ch-head h2{font-size:12.5px;margin:0;font-weight:600;letter-spacing:.2px}
+  .ch-head .tag{font-family:var(--mono);font-size:9.5px;color:var(--dim-2);border:1px solid var(--line);
+    border-radius:20px;padding:1px 7px}
+  .card.pick .tag{color:#a9d3ff;border-color:#2b5a86;background:rgba(79,156,249,.1)}
+  .why{color:var(--dim-2);font-size:11px;margin:5px 0 8px;line-height:1.6;min-height:16px}
+  .why b{color:#b9cbdd;font-weight:600}
+  .cv-wrap{position:relative;height:300px;border-radius:8px;overflow:hidden}
+  canvas{width:100%;height:100%;display:block}
+  .notes{list-style:none;margin:8px 0 0;padding:0;font-size:10.8px;color:var(--dim);line-height:1.8;
+         display:flex;flex-direction:column;gap:0}
+  .notes li::before{content:"＋";color:var(--ok);margin-right:5px;font-family:var(--mono)}
+  .notes li.c::before{content:"−";color:var(--warn)}
+  .legend{display:flex;gap:12px;font-size:10px;color:var(--dim-2);align-items:center;margin-top:6px;flex-wrap:wrap}
+  .legend i{display:inline-block;width:9px;height:0;border-top:2px solid #8fa0b3;margin-right:4px;vertical-align:2px}
+  .legend .sq{width:8px;height:8px;border:0;border-radius:2px;vertical-align:0px}
+  .tabs{display:flex;gap:5px}
+  .tabs button{font-family:var(--mono);font-size:10px;height:20px;padding:0 9px;border-radius:5px;
+    border:1px solid var(--line);background:#18212c;color:var(--dim);cursor:pointer}
+  .tabs button.on{background:#1b3f68;border-color:#2f6fb8;color:#a9d3ff}
+  .topbar{display:flex;align-items:center;gap:9px;margin-bottom:5px}
+  .topbar .sp{flex:1}
+  @media (max-width:1080px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<h1>曲线展示方案对比</h1>
+<p class="sub">
+  同一份数据（电源 CH1 5V/2A 在 t=8s 加载、CH2 3.3V/33mA、CH3 1.8V/18mA）画四遍，只改版式。<br>
+  根子上的问题：<b>电压、电流、功率量纲不同，硬塞进同一张图的左右轴，读者得在大脑里做单位换算</b>；线一多就"看不出哪条是哪条"。
+</p>
+
+<div class="grid">
+
+  <!-- A -->
+  <section class="card">
+    <div class="ch-head"><h2>A · 单图双轴叠加</h2><span class="tag">当前做法</span></div>
+    <p class="why">左轴伏特、右轴安培；颜色管通道、线型管物理量。信息密度最高，每加一条线辨识度掉一档。</p>
+    <div class="cv-wrap"><canvas id="cvA"></canvas></div>
+    <div class="legend">
+      <span><i class="sq" style="background:#4f9cf9"></i>CH1</span>
+      <span><i class="sq" style="background:#2dd4bf"></i>CH2</span>
+      <span><i class="sq" style="background:#f0a83c"></i>CH3</span>
+      <span style="color:#3d4b59">|</span>
+      <span><i style="border-top-style:solid"></i>电压</span>
+      <span><i style="border-top-style:dashed"></i>电流</span>
+    </div>
+    <ul class="notes">
+      <li>只占一块地方，趋势对照最直接</li>
+      <li class="c">单位混轴：CH1 的 4.8V 与 2A 看着"同高"，实际不可比</li>
+      <li class="c">恒压时 P=V·I，功率线与电流线形状完全重合，只能二选一</li>
+    </ul>
+  </section>
+
+  <!-- B -->
+  <section class="card pick">
+    <div class="ch-head"><h2>B · 按物理量分条（共享时间轴）</h2><span class="tag">推荐</span></div>
+    <p class="why">一条一个单位，三道共用一根时间轴。示波器分道、Grafana 多面板都是这个思路——<b>量纲不同的东西不挤在一个坐标系里</b>。</p>
+    <div class="cv-wrap"><canvas id="cvB"></canvas></div>
+    <div class="legend">
+      <span><i class="sq" style="background:#4f9cf9"></i>CH1</span>
+      <span><i class="sq" style="background:#2dd4bf"></i>CH2</span>
+      <span><i class="sq" style="background:#f0a83c"></i>CH3</span>
+      <span style="color:#3d4b59">|</span>
+      <span>竖格线贯通三段，同一时刻可跨段读数</span>
+    </div>
+    <ul class="notes">
+      <li>竖着一眼看出"哪一路电压掉了、对应电流涨了多少"</li>
+      <li>每段轴自己缩放，小电流通道不会被压成一条直线</li>
+      <li>功率段可随时收起，不占地方</li>
+      <li class="c">占高，三段需要 260–320px</li>
+    </ul>
+  </section>
+
+  <!-- C -->
+  <section class="card">
+    <div class="ch-head"><h2>C · 按通道分条（段内 V/I 双轴）</h2></div>
+    <p class="why">一段一个通道，与上方 CH1/CH2/CH3 卡片顺序对齐。三路本来就是独立电源，各看各的贴近实际用法。</p>
+    <div class="cv-wrap"><canvas id="cvC"></canvas></div>
+    <div class="legend">
+      <span><i style="border-top-style:solid"></i>电压 V（左轴）</span>
+      <span><i style="border-top-style:dashed"></i>电流 A（右轴）</span>
+    </div>
+    <ul class="notes">
+      <li>每路自动缩放，CH3 的 18mA 纹波也看得清</li>
+      <li>同一路里 V 与 I 的因果（加载→压降）最直观</li>
+      <li class="c">跨通道比电压高低要来回扫三段</li>
+      <li class="c">每段仍是双轴，单位问题没根治</li>
+    </ul>
+  </section>
+
+  <!-- D -->
+  <section class="card">
+    <div class="topbar">
+      <div class="ch-head"><h2>D · 单量切换</h2></div>
+      <div class="sp"></div>
+      <div class="tabs"><button class="on">V</button><button>A</button><button>W</button></div>
+    </div>
+    <p class="why">一次只画一个物理量，靠标签切换。Keysight BenchVue、多数万用表软件是这个取舍：<b>牺牲对照，换极致干净</b>。</p>
+    <div class="cv-wrap"><canvas id="cvD"></canvas></div>
+    <div class="legend">
+      <span><i class="sq" style="background:#4f9cf9"></i>CH1</span>
+      <span><i class="sq" style="background:#2dd4bf"></i>CH2</span>
+      <span><i class="sq" style="background:#f0a83c"></i>CH3</span>
+    </div>
+    <ul class="notes">
+      <li>永远不会有 6~9 条线打架</li>
+      <li>图上只有一种单位，坐标轴不用猜</li>
+      <li class="c">看不到"电压掉的瞬间电流在涨"这种联动</li>
+      <li class="c">来回点标签才能拼出全貌</li>
+    </ul>
+  </section>
+
+</div>
+
+<script>
+/* ---------------- 造数据 ---------------- */
+const chCol = {1:'#4f9cf9',2:'#2dd4bf',3:'#f0a83c'};
+const N = 200, TSPAN = 60;
+const xs = [], D = {1:{v:[],i:[],p:[]},2:{v:[],i:[],p:[]},3:{v:[],i:[],p:[]}};
+for (let k = 0; k < N; k++) {
+  const t = TSPAN * k / (N - 1);
+  xs.push(t);
+  const i1 = t < 8 ? 0.004 : 2.0, i2 = 0.033, i3 = 0.018;
+  const v1 = 5.00 - i1 * 0.09 + Math.sin(t * 9.1) * 0.004;
+  const v2 = 3.30 - i2 * 0.08 + Math.sin(t * 7.7) * 0.003;
+  const v3 = 1.80 - i3 * 0.08 + Math.sin(t * 6.3) * 0.0025;
+  [[1, v1, i1], [2, v2, i2], [3, v3, i3]].forEach(([c, v, i]) => {
+    D[c].v.push(v); D[c].i.push(i); D[c].p.push(v * i);
+  });
+}
+
+/* ---------------- 绘图内核 ---------------- */
+function niceNum(range, round) {
+  if (range <= 0 || !isFinite(range)) return 1;
+  const exp = Math.floor(Math.log10(range));
+  const f = range / Math.pow(10, exp);
+  let nf;
+  if (round) nf = f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10;
+  else nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10;
+  return nf * Math.pow(10, exp);
+}
+function makeTicks(min, max, count) {
+  if (!isFinite(min) || !isFinite(max)) { min = 0; max = 1; }
+  if (max - min < 1e-9) max = min + 1;
+  const step = niceNum((max - min) / Math.max(1, count - 1), true);
+  const lo = Math.floor(min / step) * step;
+  const hi = Math.ceil(max / step) * step;
+  const vals = [];
+  for (let v = lo; v <= hi + step * .5; v += step) vals.push(+v.toFixed(10));
+  return { lo, hi, vals, step };
+}
+function fmtNum(v, step) {
+  const a = Math.abs(v);
+  if (a >= 1000) return v.toFixed(0);
+  if (step >= 1) return v.toFixed(0);
+  if (step >= .1) return v.toFixed(1);
+  if (step >= .01) return v.toFixed(2);
+  if (a < .01 && a > 0) return v.toFixed(3);
+  return v.toFixed(2);
+}
+function boundsOf(list) {
+  let mx = -Infinity;
+  list.forEach(s => s.vals.forEach(v => { if (v != null && isFinite(v) && v > mx) mx = v; }));
+  if (!isFinite(mx) || mx <= 0) mx = 1;
+  return mx;
+}
+
+/**
+ * panels: [{ label, ru, series:[{vals,color,dash,width,axis}] }]
+ * 每段 = 13px 标签带 + 绘图区；竖格线贯通全图。
+ */
+function draw(canvas, panels, opt) {
+  opt = opt || {};
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const W = Math.round(rect.width), H = Math.round(rect.height);
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (W < 60 || H < 60) return;
+
+  const n = panels.length;
+  const anyRight = panels.some(p => p.series.some(s => s.axis === 'right'));
+  const padL = 40;
+  const padR = anyRight ? 44 : 10;
+  const padT = 2, padB = 18, gap = opt.gap != null ? opt.gap : 13;
+  const band = 13;
+  const pw = W - padL - padR;
+  const ph = (H - padT - padB - band * n - gap * (n - 1)) / n;
+
+  const xmin = xs[0], xmax = xs[xs.length - 1];
+  const xSpan = Math.max(xmax - xmin, 1e-9);
+  const X = v => padL + (v - xmin) / xSpan * pw;
+  const xt = makeTicks(xmin, xmax, Math.max(2, Math.min(8, Math.round(pw / 92))));
+  const bottomY = padT + n * band + n * ph + gap * (n - 1);
+
+  ctx.font = '10px "JetBrains Mono", Consolas, monospace';
+  ctx.textBaseline = 'middle';
+
+  // 贯通竖格线
+  ctx.strokeStyle = '#141d27'; ctx.lineWidth = 1;
+  xt.vals.forEach(v => {
+    if (v < xmin - 1e-9 || v > xmax + 1e-9) return;
+    const x = Math.round(X(v)) + .5;
+    ctx.beginPath(); ctx.moveTo(x, padT + band - 4); ctx.lineTo(x, bottomY); ctx.stroke();
+  });
+
+  panels.forEach((p, idx) => {
+    const labelY = padT + idx * (band + ph + gap);
+    const y0 = labelY + band;
+    const left = p.series.filter(s => s.axis !== 'right');
+    const right = p.series.filter(s => s.axis === 'right');
+    const lm = boundsOf(left), rm = boundsOf(right);
+    const tickN = Math.max(3, Math.min(5, Math.round(ph / 30)));
+    const lt = makeTicks(0, lm * 1.08, tickN);
+    const rt = makeTicks(0, rm * 1.08, tickN);
+    const LY = v => y0 + ph - (v - lt.lo) / (lt.hi - lt.lo) * ph;
+    const RY = v => y0 + ph - (v - rt.lo) / (rt.hi - rt.lo) * ph;
+
+    // 段标签（上方独立一条带，永不与刻度打架）
+    if (p.label) {
+      ctx.fillStyle = '#7e8fa1'; ctx.textAlign = 'left';
+      ctx.font = '9.5px "JetBrains Mono", Consolas, monospace';
+      ctx.fillText(p.label, padL + 1, labelY + 6.5);
+    }
+    if (p.ru) {
+      ctx.fillStyle = '#657383'; ctx.textAlign = 'right';
+      ctx.fillText(p.ru, padL + pw, labelY + 6.5);
+    }
+    ctx.font = '10px "JetBrains Mono", Consolas, monospace';
+
+    // 横格线 + 左刻度
+    ctx.strokeStyle = '#1a2531'; ctx.lineWidth = 1;
+    ctx.fillStyle = '#657383'; ctx.textAlign = 'right';
+    lt.vals.forEach(v => {
+      const y = Math.round(LY(v)) + .5;
+      if (y < y0 - 1 || y > y0 + ph + 1) return;
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + pw, y); ctx.stroke();
+      if (y > y0 + 5 && y < y0 + ph - 3) ctx.fillText(fmtNum(v, lt.step), padL - 6, y);
+    });
+    if (right.length) {
+      ctx.textAlign = 'left';
+      rt.vals.forEach(v => {
+        const y = Math.round(RY(v)) + .5;
+        if (y < y0 + 5 || y > y0 + ph - 3) return;
+        ctx.fillText(fmtNum(v, rt.step), padL + pw + 7, y);
+      });
+    }
+
+    // 左竖 + 底横
+    ctx.strokeStyle = '#1e2836';
+    ctx.beginPath();
+    ctx.moveTo(padL + .5, y0); ctx.lineTo(padL + .5, y0 + ph);
+    ctx.lineTo(padL + pw, y0 + ph);
+    ctx.stroke();
+
+    p.series.forEach(s => {
+      const Y = s.axis === 'right' ? RY : LY;
+      const pts = s.vals.map((v, i) => (v == null || !isFinite(v)) ? null : [X(xs[i]), Y(v)]);
+      ctx.beginPath();
+      let started = false;
+      pts.forEach(pt => {
+        if (!pt) { started = false; return; }
+        if (!started) { ctx.moveTo(pt[0], pt[1]); started = true; }
+        else ctx.lineTo(pt[0], pt[1]);
+      });
+      if (s.dash) {
+        ctx.save(); ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(10,14,19,.94)';
+        ctx.lineWidth = (s.width || 1.8) + 3.6;
+        ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
+      }
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = s.width || 1.8;
+      ctx.lineJoin = 'round';
+      ctx.setLineDash(s.dash || []);
+      ctx.stroke(); ctx.setLineDash([]);
+    });
+  });
+
+  // X 轴：末位刻度带单位
+  ctx.fillStyle = '#657383';
+  const yx = bottomY + 10;
+  const lastV = xt.vals[xt.vals.length - 1];
+  xt.vals.forEach(v => {
+    if (v < xmin - 1e-9 || v > xmax + 1e-9) return;
+    const isLast = v === lastV;
+    ctx.textAlign = isLast ? 'right' : 'center';
+    const s = isLast ? fmtNum(v, xt.step) + ' s' : fmtNum(v, xt.step);
+    ctx.fillText(s, X(v) + (isLast ? 10 : 0), yx);
+  });
+}
+
+/* ---------------- 四种版式 ---------------- */
+const S3 = q => [1, 2, 3].map(c => ({ vals: D[c][q], color: chCol[c], axis: 'left', width: 1.7 }));
+
+draw(document.getElementById('cvA'), [{
+  label: '电压 V / 电流 A', ru: 'A',
+  series: [...S3('v'), ...[1, 2, 3].map(c => ({
+    vals: D[c].i, color: chCol[c], axis: 'right', width: 1.8, dash: [7, 4]
+  }))]
+}], { gap: 0 });
+
+draw(document.getElementById('cvB'), [
+  { label: '电压 V', series: S3('v') },
+  { label: '电流 A', series: S3('i') },
+  { label: '功率 W', series: S3('p') },
+], { gap: 12 });
+
+draw(document.getElementById('cvC'), [1, 2, 3].map(c => ({
+  label: 'CH' + c, ru: 'A',
+  series: [
+    { vals: D[c].v, color: chCol[c], axis: 'left', width: 1.9 },
+    { vals: D[c].i, color: '#8794a6', axis: 'right', width: 1.5, dash: [7, 4] },
+  ]
+})), { gap: 12 });
+
+draw(document.getElementById('cvD'), [{ label: '电压 V', series: S3('v') }], { gap: 0 });
+</script>
+</body>
+</html>
