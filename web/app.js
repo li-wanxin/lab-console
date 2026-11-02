@@ -521,18 +521,18 @@ function plot(canvas, cfg) {
           if (y >= yT - 2 && y <= yB + 2) powYs.push([v, y]);
         });
       }
-      // 右缘短刻度线（4px，同色）：跟随各自标签的行（功率上/电流下），
-      // 若都画在格线 y 上两组会完全重叠、无法分辨颜色归属
+      // 右缘短指示杠：每条格线一根、正对格线 y，中性色（非橙非青），
+      // 功率(上)/电流(下)两个数值以它为界对读；不再用两色杠以免位置脱离虚线
       ctx.lineWidth = 1;
-      const tick = (y, color) => {
-        ctx.strokeStyle = color;
+      lt.vals.forEach(v => {
+        const y = Math.round(LY(v));
+        if (y < yT - 2 || y > yB + 2) return;
+        ctx.strokeStyle = pal.label;
         ctx.beginPath();
         ctx.moveTo(padL + pw - 4, y + 0.5);
         ctx.lineTo(padL + pw, y + 0.5);
         ctx.stroke();
-      };
-      curYs.forEach(([, y]) => tick(y + 9, p.rc || pal.label));
-      powYs.forEach(([, y]) => tick(y - 9, p.wc || pal.label));
+      });
       ctx.textAlign = 'left';
       powYs.forEach(([v, y]) => {
         ctx.fillStyle = p.wc || pal.label;
