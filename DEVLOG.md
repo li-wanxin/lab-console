@@ -100,6 +100,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-03（v78）**：修目录选择弹窗两个 UI 问题（用户反馈）。①弹窗被「开始记录」盖住——dir-mask 在 DOM 中排在 rec-mask 之前、同为 z-index:200，后者覆盖前者 → #dir-mask z-index 提到 220；②「选择目录」按钮文字溢出——tiny 按钮在 .row flex 里被压缩 → button.tiny 加 flex:0 0 auto + white-space:nowrap。另向用户说明：浏览器模式因安全模型无法调用系统原生目录对话框（拿不到本地完整路径），桌面版走 pywebview 原生对话框，浏览器模式只能用自制目录浏览弹窗。?v=78。
 
+- **2026-11-03（v78）**：修目录选择弹窗两个 UI 问题（用户反馈）。①弹窗被「开始记录」盖住——dir-mask 在 DOM 中排在 rec-mask 之前、同为 z-index:200，后者覆盖前者 → #dir-mask z-index 提到 220；②「选择目录」按钮文字溢出——tiny 按钮在 .row flex 里被压缩 → button.tiny 加 flex:0 0 auto + white-space:nowrap。另向用户说明：浏览器模式因安全模型无法调用系统原生目录对话框（拿不到本地完整路径），桌面版走 pywebview 原生对话框，浏览器模式只能用自制目录浏览弹窗。?v=78。
+
 ## 六、当前状态（v78）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
