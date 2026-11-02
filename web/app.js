@@ -1117,7 +1117,7 @@ function renderPowerPanel(st, d) {
     }
     const [v, i, pw] = cardPoint(d, o);
     card.classList.toggle('active', on);
-    card.querySelector('[data-k="v"]').textContent = Number(v).toFixed(3);
+    card.querySelector('[data-k="v"]').textContent = fmtV(v);
     card.querySelector('[data-k="i"]').textContent = fmtI(i);
     card.querySelector('[data-k="p"]').textContent = fmtP(pw);
 
@@ -1244,30 +1244,19 @@ function fmtClock(t) {
   return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
 
-/* 电压显示：正常 3 位小数，小值（关断噪声等）保留 3 位有效数字去尾零 */
+/* 电压/电流/功率显示：统一固定 6 位小数补零——所有通道、卡片、游标、
+   数据表、总功率位数完全一致（精度不损失，与 CSV 导出一致） */
 function fmtV(x) {
   if (x == null || !isFinite(x)) return '—';
-  const a = Math.abs(Number(x));
-  if (a === 0 || a >= 0.01) return Number(x).toFixed(3);
-  const d = Math.min(6, Math.max(3, 2 - Math.floor(Math.log10(a))));
-  return Number(x).toFixed(d).replace(/(\.\d{3}\d*?)0+$/, '$1');
+  return Number(x).toFixed(6);
 }
-/* 电流/功率显示：小值保留 3 位有效数字（去尾零），精度不损失 */
 function fmtI(x) {
   if (x == null || !isFinite(x)) return '—';
-  const a = Math.abs(Number(x));
-  if (a === 0) return '0.000';
-  if (a >= 0.001) return Number(x).toFixed(3);
-  const d = Math.min(6, Math.max(3, 2 - Math.floor(Math.log10(a))));
-  return Number(x).toFixed(d).replace(/(\.\d{3}\d*?)0+$/, '$1');
+  return Number(x).toFixed(6);
 }
 function fmtP(x) {
   if (x == null || !isFinite(x)) return '—';
-  const a = Math.abs(Number(x));
-  if (a === 0) return '0.00';
-  if (a >= 0.01) return Number(x).toFixed(2);
-  const d = Math.min(6, Math.max(3, 2 - Math.floor(Math.log10(a))));
-  return Number(x).toFixed(d).replace(/(\.\d{3}\d*?)0+$/, '$1');
+  return Number(x).toFixed(6);
 }
 
 function rowsHtml(rows, get, t0) {
