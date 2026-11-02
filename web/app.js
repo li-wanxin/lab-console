@@ -346,9 +346,20 @@ function fmt(v, step) {
   if (step >= 0.1) return v.toFixed(1);
   if (step >= 0.01) return v.toFixed(2);
   if (step >= 0.001) return v.toFixed(3);
-  // 更小的步长（mA/µA 级电流轴）：按步长量级给足位数，再去掉第 3 位后的尾零
+  // 更小的步长（mA/µA 级电流轴等）：按步长量级给足位数，固定位数不去尾零，
+  // 保证同轴标签位数一致、相邻标签间隔均匀可读
   const d = Math.min(6, Math.max(3, 1 - Math.floor(Math.log10(step))));
-  return v.toFixed(d).replace(/(\.\d{3}\d*?)0+$/, '$1');
+  return v.toFixed(d);
+}
+
+/* 格线反算标签专用：值不是刻度步长的整数倍（按格线高度反算），
+   位数取"相邻标签至少差 1 位"（ceil(-log10(step))+1），固定位数去歧义 */
+function fmtPrec(v, step) {
+  const a = Math.abs(v);
+  if (a >= 1000) return v.toFixed(0);
+  if (!isFinite(step) || step <= 0) return fmt(v, 0.001);
+  const d = Math.min(7, Math.max(3, Math.ceil(-Math.log10(step)) + 1));
+  return v.toFixed(d);
 }
 
 /* ------------------------------------------------------------------ */
@@ -478,23 +489,27 @@ function plot(canvas, cfg) {
     });
     // 右侧刻度与格线严格对齐：同一列（x=padL+pw+7 左对齐），
     // 同一条格线上方标功率值（橙）、下方标电流值（青），
-    // 值由该 y 在各自轴量程上反算，保证"数字 ↔ 格线 ↔ 曲线"三者可对读
+    // 值由该 y 在各自轴量程上反算，保证"数字 ↔ 格线 ↔ 曲线"三者可对读。
+    // 小数位按"相邻格线的实际数值间隔"决定（而非轴自身刻度步长），
+    // 否则间隔比步长细时两个不同值会舍入成同一个标签（如连续两个 0.004）
     if (right.length || r2.length) {
       const spanY = yB - yT;
       const curAt = y => rt.lo + (yB - y) / spanY * (rt.hi - rt.lo);
       const powAt = y => r2t ? r2t.lo + (yB - y) / spanY * (r2t.hi - r2t.lo) : 0;
-      lt.vals.forEach(v => {
-        const y = Math.round(LY(v));
-        if (y < yT - 2 || y > yB + 2) return;
+      const ys = lt.vals.map(v => Math.round(LY(v))).filter(y => y >= yT - 2 && y <= yB + 2);
+      const yGap = ys.length > 1 ? Math.abs(ys[1] - ys[0]) : spanY / 4;
+      const curStep = Math.abs(curAt(yT) - curAt(yT + yGap)) || rt.step;
+      const powStep = r2t ? (Math.abs(powAt(yT) - powAt(yT + yGap)) || r2t.step) : 1;
+      ys.forEach(y => {
         if (r2.length) {
           ctx.fillStyle = p.wc || pal.label;
           ctx.textAlign = 'left';
-          ctx.fillText(fmt(powAt(y), r2t.step), padL + pw + 7, y - 9);
+          ctx.fillText(fmtPrec(powAt(y), powStep), padL + pw + 7, y - 9);
         }
         if (right.length) {
           ctx.fillStyle = p.rc || pal.label;
           ctx.textAlign = 'left';
-          ctx.fillText(fmt(curAt(y), rt.step), padL + pw + 7, y + 9);
+          ctx.fillText(fmtPrec(curAt(y), curStep), padL + pw + 7, y + 9);
         }
       });
     }
