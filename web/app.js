@@ -460,7 +460,7 @@ function plot(canvas, cfg) {
       ctx.font = '11.5px "JetBrains Mono", Consolas, monospace';
     }
 
-    // 横格线 + 左刻度
+    // 横格线（按左轴格线 y）+ 左刻度
     ctx.strokeStyle = pal.hline;
     ctx.lineWidth = 1;
     ctx.fillStyle = p.lc || pal.label;
@@ -474,23 +474,25 @@ function plot(canvas, cfg) {
       ctx.stroke();
       ctx.fillText(fmt(v, lt.step), padL - 6, y);
     });
-    // 右刻度（电流）+ 右外刻度（功率）
-    if (right.length) {
-      ctx.fillStyle = p.rc || pal.label;
-      ctx.textAlign = 'left';
-      rt.vals.forEach(v => {
-        const y = Math.round(RY(v)) + 0.5;
+    // 右侧刻度与格线严格对齐：同一条格线，上方标功率值（橙）、下方标电流值（青），
+    // 值由该 y 在各自轴量程上反算，保证"数字 ↔ 格线 ↔ 曲线"三者可对读
+    if (right.length || r2.length) {
+      const spanY = yB - yT;
+      const curAt = y => rt.lo + (yB - y) / spanY * (rt.hi - rt.lo);
+      const powAt = y => r2t ? r2t.lo + (yB - y) / spanY * (r2t.hi - r2t.lo) : 0;
+      lt.vals.forEach(v => {
+        const y = Math.round(LY(v));
         if (y < yT - 2 || y > yB + 2) return;
-        ctx.fillText(fmt(v, rt.step), padL + pw + (r2t ? 54 : 7), y);
-      });
-    }
-    if (r2.length) {
-      ctx.fillStyle = p.wc || pal.label;
-      ctx.textAlign = 'left';
-      r2t.vals.forEach(v => {
-        const y = Math.round(R2Y(v)) + 0.5;
-        if (y < yT - 2 || y > yB + 2) return;
-        ctx.fillText(fmt(v, r2t.step), padL + pw + 7, y);
+        if (right.length) {
+          ctx.fillStyle = p.rc || pal.label;
+          ctx.textAlign = 'left';
+          ctx.fillText(fmt(curAt(y), rt.step), padL + pw + (r2.length ? 54 : 7), y + 9);
+        }
+        if (r2.length) {
+          ctx.fillStyle = p.wc || pal.label;
+          ctx.textAlign = 'left';
+          ctx.fillText(fmt(powAt(y), r2t.step), padL + pw + 7, y - 9);
+        }
       });
     }
 
@@ -646,8 +648,9 @@ function drawCursor(g, idx, box) {
     ctx.fillStyle = pal.cursorVal;
     p.series.forEach((s, ci) => {
       const v = s.vals[idx];
+      // 高精度：电压/电流/功率各按量纲取位（fmtV/fmtI/fmtP 小值保留 3 位有效数字）
       const t = v == null || !isFinite(v) ? '—'
-        : (Math.abs(v) < 0.1 && v !== 0 ? v.toFixed(4) : v.toFixed(3));
+        : (ci === 0 ? fmtV(v) : ci === 1 ? fmtI(v) : fmtP(v));
       ctx.fillText(t, bx + padX + labW + colW * ci, yy);
     });
   });
@@ -1208,6 +1211,14 @@ function fmtClock(t) {
   return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
 
+/* 电压显示：正常 3 位小数，小值（关断噪声等）保留 3 位有效数字去尾零 */
+function fmtV(x) {
+  if (x == null || !isFinite(x)) return '—';
+  const a = Math.abs(Number(x));
+  if (a === 0 || a >= 0.01) return Number(x).toFixed(3);
+  const d = Math.min(6, Math.max(3, 2 - Math.floor(Math.log10(a))));
+  return Number(x).toFixed(d).replace(/(\.\d{3}\d*?)0+$/, '$1');
+}
 /* 电流/功率显示：小值保留 3 位有效数字（去尾零），精度不损失 */
 function fmtI(x) {
   if (x == null || !isFinite(x)) return '—';
@@ -1228,13 +1239,14 @@ function fmtP(x) {
 
 function rowsHtml(rows, get, t0) {
   if (!rows.length) return '<tr><td colspan="4" class="td-empty">—</td></tr>';
-  const f = (x, d) => (x == null ? '—' : Number(x).toFixed(d));
+  // 固定 6 位小数补零，列内位数一致；CSS 左对齐
+  const f = x => (x == null ? '—' : Number(x).toFixed(6));
   return rows.map(h => {
     const a = get ? get(h) : null;
     return '<tr><td>' + fmtClock(h.t) + '</td>'
-      + '<td class="col-v">' + f(a ? a[0] : null, 3) + '</td>'
-      + '<td class="col-i">' + fmtI(a ? a[1] : null) + '</td>'
-      + '<td class="col-p">' + fmtP(a ? a[2] : null) + '</td></tr>';
+      + '<td class="col-v">' + f(a ? a[0] : null) + '</td>'
+      + '<td class="col-i">' + f(a ? a[1] : null) + '</td>'
+      + '<td class="col-p">' + f(a ? a[2] : null) + '</td></tr>';
   }).join('');
 }
 
@@ -1331,7 +1343,7 @@ function renderPowerCurves(st) {
         stEl.className = 'cell-state' + (on ? ' on' : (occupied ? ' occ' : ''));
       }
       if (cd.tbody) {
-        cd.tbody.innerHTML = rowsHtml(sampleRows(hist, 40),
+        cd.tbody.innerHTML = rowsHtml(sampleRows(hist, 200),
           h => combinedPoint(histPayload(h, d.id), o), hist.length ? hist[0].t : 0);
       }
       if (hist.length < 2) {
@@ -1391,7 +1403,7 @@ function renderLoadCurves(st) {
     const tip = $('.curve-single .empty-tip', sec);
     const winEl = $('.curve-win', sec);
     const ltb = $('.load-table tbody', sec);
-    if (ltb) ltb.innerHTML = rowsHtml(sampleRows(hist, 40), h => histPayload(h, d.id).load, hist[0].t);
+    if (ltb) ltb.innerHTML = rowsHtml(sampleRows(hist, 200), h => histPayload(h, d.id).load, hist[0].t);
 
     if (hist.length < 2) {
       const ctx = canvas.getContext('2d');

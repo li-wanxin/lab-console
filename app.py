@@ -817,6 +817,11 @@ class Bench:
             return [A[0] + B[0], min(A[1], B[1]), A[2] + B[2]]
         return [A[0], A[1] + B[1], A[2] + B[2]]
 
+    @staticmethod
+    def _csv_time(t: float) -> str:
+        """CSV 时间列：精确到毫秒（记录间隔可小于 1s，秒级会重复）。"""
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) + f".{int(t * 1000) % 1000:03d}"
+
     def _write_recording(self, rec: dict, rows: list) -> None:
         buf = io.StringIO()
         w = csv.writer(buf)
@@ -826,7 +831,7 @@ class Bench:
                 head += [f"{o['label']}_电压_V", f"{o['label']}_电流_A", f"{o['label']}_功率_W"]
             w.writerow(head)
             for h in rows:
-                line = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(h["t"]))]
+                line = [self._csv_time(h["t"])]
                 for o in rec["outputs"]:
                     line += self._combined_point(h["d"], o)
                 w.writerow(line)
@@ -835,7 +840,7 @@ class Bench:
             for h in rows:
                 mode, level = h["d"].get("lset", ["", ""])
                 w.writerow([
-                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(h["t"])),
+                    self._csv_time(h["t"]),
                     *h["d"]["load"], mode, level,
                 ])
         Path(rec["path"]).write_bytes(buf.getvalue().encode("utf-8-sig"))
