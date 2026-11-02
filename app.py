@@ -439,16 +439,17 @@ class Bench:
                         try:
                             v, i = dev.driver.measure(ch)
                             st = dev.channels[ch]
-                            st["v"] = round(v, 4)
-                            st["i"] = round(i, 4)
-                            st["p"] = round(v * i, 3)
+                            # 保留仪器回读精度（6 位有效）：小电流 mW 级功率不丢位
+                            st["v"] = round(v, 6)
+                            st["i"] = round(i, 6)
+                            st["p"] = round(v * i, 6)
                             dev.meta["error"] = ""
                         except Exception as exc:  # noqa: BLE001
                             dev.meta["error"] = str(exc)
                 else:
                     try:
                         v, i, p = dev.driver.measure()
-                        dev.state.update({"v": round(v, 4), "i": round(i, 4), "p": round(p, 3)})
+                        dev.state.update({"v": round(v, 6), "i": round(i, 6), "p": round(p, 6)})
                         dev.meta["error"] = ""
                     except Exception as exc:  # noqa: BLE001
                         dev.meta["error"] = str(exc)

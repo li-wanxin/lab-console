@@ -345,8 +345,10 @@ function fmt(v, step) {
   if (step >= 1) return v.toFixed(0);
   if (step >= 0.1) return v.toFixed(1);
   if (step >= 0.01) return v.toFixed(2);
-  if (a < 0.01 && a > 0) return v.toFixed(3);
-  return v.toFixed(2);
+  if (step >= 0.001) return v.toFixed(3);
+  // 更小的步长（mA/µA 级电流轴）：按步长量级给足位数，再去掉第 3 位后的尾零
+  const d = Math.min(6, Math.max(3, 1 - Math.floor(Math.log10(step))));
+  return v.toFixed(d).replace(/(\.\d{3}\d*?)0+$/, '$1');
 }
 
 /* ------------------------------------------------------------------ */
@@ -375,7 +377,8 @@ function plot(canvas, cfg) {
   const anyRight = panels.some(p => p.series.some(s => s.axis === 'right'));
   const anyR2 = panels.some(p => p.series.some(s => s.axis === 'right2'));
   const padL = 42;
-  const padR = anyR2 ? 68 : (anyRight ? 44 : 10);
+  // 双右轴时电流刻度在最外侧（pw+54 起笔），需给足宽度，否则小数标签被画布裁掉
+  const padR = (anyRight && anyR2) ? 108 : ((anyRight || anyR2) ? 54 : 10);
   const padT = 2;
   const padB = 18;
   const gap = cfg.gap != null ? cfg.gap : 12;
@@ -413,7 +416,7 @@ function plot(canvas, cfg) {
     ctx.fillStyle = pal.unit;
     ctx.font = '10.5px "JetBrains Mono", Consolas, monospace';
     if (units.l) { ctx.textAlign = 'right'; ctx.fillText(units.l, padL - 6, padT + 6.5); }
-    if (units.r && anyRight) { ctx.textAlign = 'left'; ctx.fillText(units.r, padL + pw + (anyR2 ? 40 : 7), padT + 6.5); }
+    if (units.r && anyRight) { ctx.textAlign = 'left'; ctx.fillText(units.r, padL + pw + (anyR2 ? 54 : 7), padT + 6.5); }
     if (units.r2 && anyR2) { ctx.textAlign = 'left'; ctx.fillText(units.r2, padL + pw + 7, padT + 6.5); }
     ctx.font = '11.5px "JetBrains Mono", Consolas, monospace';
   }
@@ -478,7 +481,7 @@ function plot(canvas, cfg) {
       rt.vals.forEach(v => {
         const y = Math.round(RY(v)) + 0.5;
         if (y < yT - 2 || y > yB + 2) return;
-        ctx.fillText(fmt(v, rt.step), padL + pw + (r2t ? 40 : 7), y);
+        ctx.fillText(fmt(v, rt.step), padL + pw + (r2t ? 54 : 7), y);
       });
     }
     if (r2.length) {
@@ -1205,16 +1208,22 @@ function fmtClock(t) {
   return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
 
-/* 电流/功率显示：小值自动加位，避免 0.0002A/0.003W 被显示成 0.000/0.00 */
+/* 电流/功率显示：小值保留 3 位有效数字（去尾零），精度不损失 */
 function fmtI(x) {
   if (x == null || !isFinite(x)) return '—';
   const a = Math.abs(Number(x));
-  return a > 0 && a < 0.001 ? Number(x).toFixed(4) : Number(x).toFixed(3);
+  if (a === 0) return '0.000';
+  if (a >= 0.001) return Number(x).toFixed(3);
+  const d = Math.min(6, Math.max(3, 2 - Math.floor(Math.log10(a))));
+  return Number(x).toFixed(d).replace(/(\.\d{3}\d*?)0+$/, '$1');
 }
 function fmtP(x) {
   if (x == null || !isFinite(x)) return '—';
   const a = Math.abs(Number(x));
-  return a > 0 && a < 0.01 ? Number(x).toFixed(3) : Number(x).toFixed(2);
+  if (a === 0) return '0.00';
+  if (a >= 0.01) return Number(x).toFixed(2);
+  const d = Math.min(6, Math.max(3, 2 - Math.floor(Math.log10(a))));
+  return Number(x).toFixed(d).replace(/(\.\d{3}\d*?)0+$/, '$1');
 }
 
 function rowsHtml(rows, get, t0) {
@@ -1347,7 +1356,7 @@ function renderPowerCurves(st) {
           lc: '#4f9cf9', rc: '#2dd4bf', wc: '#f0a83c',
           series: [
             { vals: view.map(h => combinedPoint(histPayload(h, d.id), o)[0]), color: '#4f9cf9', width: 1.9 },
-            { vals: view.map(h => combinedPoint(histPayload(h, d.id), o)[1]), color: '#2dd4bf', width: 1.7 },
+            { vals: view.map(h => combinedPoint(histPayload(h, d.id), o)[1]), color: '#2dd4bf', width: 1.7, axis: 'right' },
             { vals: view.map(h => combinedPoint(histPayload(h, d.id), o)[2]), color: '#f0a83c', axis: 'right2', width: 1.6 },
           ],
         }],
@@ -1413,7 +1422,7 @@ function renderLoadCurves(st) {
         lc: '#4f9cf9', rc: '#2dd4bf', wc: '#f0a83c',
         series: [
           { vals: view.map(h => pick(histPayload(h, d.id).load, 0)), color: '#4f9cf9', width: 2 },
-          { vals: view.map(h => pick(histPayload(h, d.id).load, 1)), color: '#2dd4bf', width: 1.8 },
+          { vals: view.map(h => pick(histPayload(h, d.id).load, 1)), color: '#2dd4bf', width: 1.8, axis: 'right' },
           { vals: view.map(h => pick(histPayload(h, d.id).load, 2)), color: '#f0a83c', axis: 'right2', width: 1.7 },
         ],
       }],
