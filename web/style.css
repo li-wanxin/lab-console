@@ -1120,3 +1120,27 @@ html.light .wire-off-btn:hover:not(:disabled) { background: #a53226; }
 }
 html.light .occupy-tag { background: #fdf3df; border-color: #e5cd96; color: #a06a08; }
 .cell-state.occ { color: var(--warn); }
+
+/* 目录选择弹窗（浏览器模式的存储目录浏览） */
+.dir-bar { display: flex; align-items: center; gap: 8px; margin: 8px 0 6px; }
+.dir-cur {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-soft);
+  background: var(--inset); border: 1px solid var(--inset-line); border-radius: 6px;
+  padding: 5px 8px;
+}
+.dir-list {
+  height: 240px; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--inset-line); border-radius: 8px; background: var(--inset);
+  scrollbar-width: thin; scrollbar-color: var(--line-hi) transparent;
+}
+.dir-list .dir-item {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 10px; cursor: pointer;
+  font-size: 12.5px; color: var(--text-soft);
+  border-bottom: 1px solid var(--row-line);
+  transition: background .1s;
+}
+.dir-list .dir-item:hover { background: var(--hover); color: var(--text-hi); }
+.dir-list .dir-item .ico { color: #f0b64f; font-size: 13px; }
+.dir-list .dir-empty { text-align: center; color: var(--dim-3); padding: 26px 0; font-size: 12px; }

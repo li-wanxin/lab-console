@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ITECH 测试台 · IT6302 + IT8511A+</title>
-<link rel="stylesheet" href="style.css?v=69">
+<link rel="stylesheet" href="style.css?v=76">
 </head>
 <body>
 
@@ -290,6 +290,23 @@
   </div>
 </div>
 
+<div class="modal-mask" id="dir-mask" style="display:none">
+  <div class="modal" style="max-width:460px">
+    <h3>选择存储目录</h3>
+    <div class="dir-bar">
+      <button type="button" class="tiny ghost" id="dir-up">上一级</button>
+      <span class="dir-cur" id="dir-cur">（程序目录）</span>
+    </div>
+    <div class="dir-list" id="dir-list"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="dir-new">新建文件夹</button>
+      <span style="flex:1"></span>
+      <button class="ghost" id="dir-cancel">取消</button>
+      <button class="primary" id="dir-ok">选择此目录</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-mask" id="rec-mask" style="display:none">
   <div class="modal">
     <h3 id="rec-title">开始记录</h3>
@@ -301,14 +318,14 @@
     <div class="rec-chans" id="rec-chans"></div>
     <label class="field">
       <span>存储目录</span>
-      <input type="text" id="rec-dir" spellcheck="false" placeholder="相对程序目录或绝对路径，留空 = 程序目录">
+      <div class="row" style="margin:0">
+        <input type="text" id="rec-dir" spellcheck="false" style="flex:1 1 auto" placeholder="相对程序目录或绝对路径，留空 = 程序目录">
+        <button type="button" class="tiny ghost" id="rec-browse" title="浏览并选择目录">选择目录</button>
+      </div>
     </label>
     <label class="field">
       <span>文件名</span>
-      <div class="row" style="margin:0">
-        <input type="text" id="rec-path" spellcheck="false" style="flex:1 1 auto">
-        <button type="button" class="tiny ghost" id="rec-browse" style="display:none" title="打开系统目录选择">选择目录</button>
-      </div>
+      <input type="text" id="rec-path" spellcheck="false">
     </label>
     <label class="field">
       <span>记录间隔</span>
@@ -330,6 +347,6 @@
   </div>
 </div>
 
-<script src="app.js?v=75"></script>
+<script src="app.js?v=76"></script>
 </body>
 </html>

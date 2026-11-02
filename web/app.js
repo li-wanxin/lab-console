@@ -521,7 +521,8 @@ function plot(canvas, cfg) {
           if (y >= yT - 2 && y <= yB + 2) powYs.push([v, y]);
         });
       }
-      // 右缘短刻度线（4px，同色）：数值的视觉锚点
+      // 右缘短刻度线（4px，同色）：跟随各自标签的行（功率上/电流下），
+      // 若都画在格线 y 上两组会完全重叠、无法分辨颜色归属
       ctx.lineWidth = 1;
       const tick = (y, color) => {
         ctx.strokeStyle = color;
@@ -530,8 +531,8 @@ function plot(canvas, cfg) {
         ctx.lineTo(padL + pw, y + 0.5);
         ctx.stroke();
       };
-      curYs.forEach(([, y]) => tick(y, p.rc || pal.label));
-      powYs.forEach(([, y]) => tick(y, p.wc || pal.label));
+      curYs.forEach(([, y]) => tick(y + 9, p.rc || pal.label));
+      powYs.forEach(([, y]) => tick(y - 9, p.wc || pal.label));
       ctx.textAlign = 'left';
       powYs.forEach(([v, y]) => {
         ctx.fillStyle = p.wc || pal.label;
@@ -1722,8 +1723,6 @@ function openRecDialog(devId) {
   let dir = '';
   try { dir = localStorage.getItem('itech.recdir') || ''; } catch (e) { /* 忽略 */ }
   $('#rec-dir').value = dir;
-  const bridge = window.pywebview && window.pywebview.api;
-  $('#rec-browse').style.display = bridge && bridge.pick_dir ? '' : 'none';
   try { $('#rec-iv').value = localStorage.getItem('itech.reciv') || '0.8'; } catch (e) { /* 忽略 */ }
   $('#rec-mask').style.display = 'flex';
   $('#rec-path').focus();
@@ -2318,11 +2317,83 @@ function bind() {
   $('#rec-ok').onclick = confirmRec;
   $('#rec-browse').onclick = async () => {
     const bridge = window.pywebview && window.pywebview.api;
-    if (!bridge || !bridge.pick_dir) { toast('请在桌面版中使用系统目录选择', true); return; }
+    if (bridge && bridge.pick_dir) {
+      // 桌面版：系统原生目录选择
+      try {
+        const r = await bridge.pick_dir();
+        if (r && r.ok && r.path) $('#rec-dir').value = r.path;
+      } catch (e) { toast(e.message, true); }
+      return;
+    }
+    // 浏览器模式：自制目录浏览选择器
+    openDirPicker($('#rec-dir').value.trim());
+  };
+
+  /* ---------- 目录浏览选择器（浏览器模式） ---------- */
+  let dirCur = '';
+  const dirJoin = (base, name) => (base ? base.replace(/[\\/]+$/, '') + '\\' + name : name);
+  async function fetchDirs(p) {
+    const r = await fetch('/api/fs/list?path=' + encodeURIComponent(p));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '读取目录失败');
+    return d;
+  }
+  async function renderDirs() {
+    const list = $('#dir-list');
+    list.innerHTML = '<div class="dir-empty">读取中…</div>';
     try {
-      const r = await bridge.pick_dir();
-      if (r && r.ok && r.path) $('#rec-dir').value = r.path;
+      const d = await fetchDirs(dirCur);
+      dirCur = d.path;
+      $('#dir-cur').textContent = d.path || '（程序目录 — 选择此目录即存到程序所在目录）';
+      $('#dir-up').disabled = d.parent == null && !d.path;
+      if (!d.dirs.length) {
+        list.innerHTML = '<div class="dir-empty">（空目录）</div>';
+        return;
+      }
+      list.innerHTML = d.dirs.map(n =>
+        `<div class="dir-item" data-dir="${dirJoin(d.path, n).replace(/"/g, '&quot;')}">` +
+        `<span class="ico">▸</span><span>${n.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span></div>`
+      ).join('');
+    } catch (e) {
+      list.innerHTML = `<div class="dir-empty">${e.message}</div>`;
+    }
+  }
+  function openDirPicker(start) {
+    dirCur = start || '';
+    $('#dir-mask').style.display = 'flex';
+    renderDirs();
+  }
+  $('#dir-list').addEventListener('click', ev => {
+    const item = ev.target.closest('[data-dir]');
+    if (!item) return;
+    dirCur = item.dataset.dir;
+    renderDirs();
+  });
+  $('#dir-up').onclick = async () => {
+    try {
+      const d = await fetchDirs(dirCur);
+      dirCur = d.parent == null ? '' : d.parent;
+      renderDirs();
     } catch (e) { toast(e.message, true); }
+  };
+  $('#dir-new').onclick = async () => {
+    const name = prompt('新文件夹名称：');
+    if (!name || !name.trim()) return;
+    try {
+      const r = await fetch('/api/fs/mkdir', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dirJoin(dirCur, name.trim()) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || '创建失败');
+      dirCur = d.path;
+      renderDirs();
+    } catch (e) { toast(e.message, true); }
+  };
+  $('#dir-cancel').onclick = () => { $('#dir-mask').style.display = 'none'; };
+  $('#dir-ok').onclick = () => {
+    $('#rec-dir').value = dirCur;
+    $('#dir-mask').style.display = 'none';
   };
 
   // 左右栏宽度拖动

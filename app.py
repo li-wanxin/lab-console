@@ -54,6 +54,31 @@ CHART_POINTS = 360           # 界面曲线降采样上限（全量历史均匀�
 TABLE_POINTS = 200           # 数据表取最近这么多原始点
 
 
+def list_dirs(p: str) -> dict:
+    """目录选择器用：列出 p 的子目录；p 为空时列盘符。仅本机监听，无注入面。"""
+    if not p:
+        drives = [f"{c}:\\" for c in "CDEFGHIJKLMNOPQRSTUVWXYZ"
+                  if Path(f"{c}:\\").exists()]
+        return {"path": "", "parent": None, "dirs": drives}
+    base = Path(p)
+    if not base.exists():
+        raise FileNotFoundError(f"路径不存在: {base}")
+    if not base.is_dir():
+        raise NotADirectoryError(f"不是目录: {base}")
+    dirs = []
+    try:
+        for child in sorted(base.iterdir(), key=lambda x: x.name.lower()):
+            try:
+                if child.is_dir():
+                    dirs.append(child.name)
+            except OSError:
+                pass   # 无权限/系统保留项跳过
+    except PermissionError:
+        pass
+    parent = str(base.parent) if base.parent != base else None
+    return {"path": str(base), "parent": parent, "dirs": dirs}
+
+
 # --------------------------------------------------------------------------- #
 # 业务层
 # --------------------------------------------------------------------------- #
@@ -931,6 +956,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(BENCH.snapshot())
         if path == "/api/ports":
             return self._json({"ports": list_serial_ports(), "has_serial": HAS_SERIAL})
+        if path == "/api/fs/list":
+            qs = parse_qs(urlparse(self.path).query)
+            p = (qs.get("path") or [""])[0].strip()
+            try:
+                return self._json(list_dirs(p))
+            except OSError as exc:
+                return self._json({"error": str(exc)}, 400)
         if path == "/api/export.csv":
             qs = parse_qs(urlparse(self.path).query)
             role = (qs.get("role") or ["sweep"])[0]
@@ -1031,6 +1063,12 @@ class Handler(BaseHTTPRequestHandler):
                 )
             if path == "/api/record/stop":
                 return self._json(BENCH.record_stop(body["id"]))
+            if path == "/api/fs/mkdir":
+                target = Path(body.get("path", ""))
+                if not str(target).strip():
+                    return self._json({"error": "路径为空"}, 400)
+                target.mkdir(parents=True, exist_ok=True)
+                return self._json({"ok": True, "path": str(target)})
             self.send_error(404)
         except InstrumentError as exc:
             self._json({"error": str(exc)}, 400)
