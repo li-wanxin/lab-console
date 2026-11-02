@@ -346,10 +346,10 @@ function fmt(v, step) {
   if (step >= 0.1) return v.toFixed(1);
   if (step >= 0.01) return v.toFixed(2);
   if (step >= 0.001) return v.toFixed(3);
-  // 更小的步长（mA/µA 级电流轴等）：按步长量级给足位数，固定位数不去尾零，
-  // 保证同轴标签位数一致、相邻标签间隔均匀可读
+  // 更小的步长（mA/µA 级电流轴等）：按步长量级给足位数，再去掉尾零
+  // （与功率等大步长标签风格一致，都不补 0）
   const d = Math.min(6, Math.max(3, 1 - Math.floor(Math.log10(step))));
-  return v.toFixed(d);
+  return v.toFixed(d).replace(/(\.\d{3}\d*?)0+$/, '$1');
 }
 
 /* 格线反算标签专用：值不是刻度步长的整数倍（按格线高度反算），
