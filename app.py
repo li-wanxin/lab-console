@@ -66,7 +66,7 @@ class Dev:
         self.model = model
         self.name = name
         self.driver = None
-        self.meta = {"connected": False, "sim": False, "port": "", "idn": "", "error": ""}
+        self.meta = {"connected": False, "sim": False, "port": "", "baud": 0, "idn": "", "error": ""}
         if role == "power":
             self.channels = {
                 n: {"vset": 0.0, "iset": 0.1, "on": False, "v": 0.0, "i": 0.0, "p": 0.0}
@@ -201,7 +201,8 @@ class Bench:
                     drv = IT6302(SerialTransport(port, baud))
                 dev.driver = drv
                 dev.meta.update({"connected": True, "sim": bool(sim),
-                                 "port": "SIM" if sim else port, "idn": drv.idn, "error": ""})
+                                 "port": "SIM" if sim else port, "baud": baud if not sim else 0,
+                                 "idn": drv.idn, "error": ""})
                 self._read_power_setpoints(dev)
                 if safe_start:
                     self._power_all_off(dev)
@@ -216,10 +217,14 @@ class Bench:
                             drv.power = d.driver
                             break
                 else:
-                    drv = LOAD_DRIVERS[dev.model](SerialTransport(port, baud))
+                    if getattr(LOAD_DRIVERS[dev.model], "LEGACY_SERIAL", False):
+                        drv = LOAD_DRIVERS[dev.model](port, baud)
+                    else:
+                        drv = LOAD_DRIVERS[dev.model](SerialTransport(port, baud))
                 dev.driver = drv
                 dev.meta.update({"connected": True, "sim": bool(sim),
-                                 "port": "SIM" if sim else port, "idn": drv.idn, "error": ""})
+                                 "port": "SIM" if sim else port, "baud": baud if not sim else 0,
+                                 "idn": drv.idn, "error": ""})
                 if safe_start:
                     drv.set_input(False)
                     dev.state["on"] = False
@@ -253,7 +258,7 @@ class Bench:
                     d.driver.load = None
                 if d.role == "load" and d.driver is not None and getattr(d.driver, "power", None) is drv:
                     d.driver.power = None
-        dev.meta.update({"connected": False, "sim": False, "port": "", "idn": "", "error": ""})
+        dev.meta.update({"connected": False, "sim": False, "port": "", "baud": 0, "idn": "", "error": ""})
         if dev.role == "power":
             for ch in dev.channels.values():
                 ch.update({"v": 0.0, "i": 0.0, "p": 0.0, "on": False})
@@ -375,17 +380,22 @@ class Bench:
                 return r
 
             try:
-                q("*IDN?")
-                if role == "power":
-                    q("SYST:VERS?")
-                    for c in (1, 2, 3):
-                        driver.select(c)
-                        q("VOLT?")
-                        q("CURR?")
+                if hasattr(driver, "selftest_lines"):
+                    # 老款二进制协议负载 (IT8510): 专用自检, 不走 SCPI 文本
+                    for line in driver.selftest_lines():
+                        lines.append(line)
                 else:
-                    q("FUNC?")
-                    q("INP?")
-                    q("MEAS:VOLT?")
+                    q("*IDN?")
+                    if role == "power":
+                        q("SYST:VERS?")
+                        for c in (1, 2, 3):
+                            driver.select(c)
+                            q("VOLT?")
+                            q("CURR?")
+                    else:
+                        q("FUNC?")
+                        q("INP?")
+                        q("MEAS:VOLT?")
             except Exception as exc:  # noqa: BLE001
                 err = str(exc)
 

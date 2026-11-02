@@ -758,6 +758,11 @@ function renderNav(st) {
     $$('#dev-list .dev-del').forEach(bindDelBadge);
     st.devices.forEach(d => {
       if (!S.cfg[d.id]) S.cfg[d.id] = { port: '', baud: 9600 };
+      // 已连接设备: 用后端报告的实际端口/波特率同步显示 (sim 除外)
+      if (d.connected && !d.sim && d.port) {
+        S.cfg[d.id].port = d.port;
+        if (d.baud) S.cfg[d.id].baud = d.baud;
+      }
       if (S.loadMode[d.id] == null) S.loadMode[d.id] = 'CC';
       if (S.combo[d.id] == null) S.combo[d.id] = 'none';
       if (S.comboLive[d.id] == null) S.comboLive[d.id] = null;
@@ -2323,8 +2328,6 @@ applyTheme(THEME);
 bind();
 tick();
 applyHash();
-
-
 
 
 

@@ -2,16 +2,26 @@
 ITECH 仪器驱动层
 ================
 - IT6302   三路可编程直流电源 (CH1/CH2: 30V/3A, CH3: 5V/3A)
-- IT8511A+ 可编程直流电子负载 (150V/30A/150W)
-- IT8510   可编程直流电子负载 (120V/30A/300W)
+- IT8511A+ 可编程直流电子负载 (150V/30A/150W, SCPI)
+- IT8510   可编程直流电子负载 (120V/20A/120W, 老款二进制协议)
 
 通信: 两类仪器后面板 DB9 均为 TTL 电平, 需 IT-E121(RS232)/IT-E122(USB) 转换模块,
-      在 PC 上表现为标准串口 (COMx)。SCPI 命令, 8N1, 默认 9600bps, 以 \\n 结束。
+      在 PC 上表现为标准串口 (COMx)。
+  IT6302 / IT8511A+: SCPI 文本命令, 8N1, 默认 9600bps, 以 \n 结束。
+  IT8510 (老款, 非"+"机型): 26 字节二进制私有协议, 8N1, 默认 4800bps。
+      2026-11-02 真机实测 (S/N 3797370020): 不响应任何波特率下的 SCPI;
+      帧格式 AA <addr> <cmd> <payload> <cksum>, 校验和 = 前 25 字节累加模 256;
+      设置类应答 AA <addr> 0x12 <status>..., 0x80=OK / 0xA0=参数超范围 /
+      0xB0=无法执行(常见于未进远程模式); 查询类应答原样回显 cmd 字节。
+      量程 (官方规格书 + 真机拒绝法验证): 120V/20A/120W(保护设定上限 130W),
+      CR 最高 4000Ω, CC 分辨率 0.1mA。
 
 命令依据:
   IT6302 Programming Guide  (SYST:REM / INST CHx / VOLT / CURR / CHAN:OUTP / MEAS:VOLT? / MEAS:CURR?)
   IT8500+ Programming Guide (SYST:REM / FUNC / CURR / VOLT / RES / POW / INP / MEAS:VOLT? / MEAS:CURR? / MEAS:POW?)
-  IT8510 属 IT8500 系列, 协议命令集与 IT8511A+ 完全同族, 仅量程不同。
+  IT8510 老款协议: 参照 Blinkinlabs/itech_usb_serial (it8500.py) 命令表, 关键命令已真机逐一验证
+  (0x20 远程/本地, 0x21 输入, 0x22~0x27 保护限, 0x28/0x29 模式, 0x2A~0x31 四模式电平,
+   0x5F 测量(V mV/I 0.1mA/P mW/op_state), 0x6A 识别)
 """
 
 from __future__ import annotations
@@ -177,7 +187,6 @@ class IT8511A:
     MAX_V = 150.0
     MAX_I = 30.0
     MAX_P = 150.0
-
     MODES = {"CURR": "CC", "VOLT": "CV", "RES": "CR", "POW": "CP"}
     SET_CMD = {"CC": "CURR", "CV": "VOLT", "CR": "RES", "CP": "POW"}
 
@@ -220,23 +229,166 @@ class IT8511A:
         self.t.close()
 
 
-class IT8510(IT8511A):
-    """IT8510 电子负载: IT8500 系列, SCPI 协议与 IT8511A+ 同族, 仅量程不同。"""
+# IT8510 老款机型 (非"+"): 不讲 SCPI, 用 26 字节二进制私有协议, 默认 4800bps。
+class IT8510Legacy:
+    """IT8510 老款电子负载, 26 字节二进制协议驱动 (2026-11-02 真机验证通过)。
 
+    状态码: 0x80=OK, 0x90=校验和错, 0xA0=参数超范围, 0xB0=无法执行, 0xC0=非法命令。
+    量程 (官方规格书 + 真机拒绝法验证): 120V/20A/120W (保护设定上限 130W), CR 4000Ω, CC 0.1mA 步进。
+    """
+
+    LEGACY_SERIAL = True  # app.py 据此用 (port, baud) 而非 SerialTransport 构造
     model = "IT8510"
     MAX_V = 120.0
-    MAX_I = 30.0
-    MAX_P = 300.0
+    MAX_I = 20.0
+    MAX_P = 120.0
+
+    _MODE_CODE = {"CC": 0, "CV": 1, "CP": 2, "CR": 3}
+    _MODE_NAME = {0: "CC", 1: "CV", 2: "CP", 3: "CR"}
+    _LEVEL_SET = {"CC": 0x2A, "CV": 0x2C, "CP": 0x2E, "CR": 0x30}
+    _LEVEL_GET = {"CC": 0x2B, "CV": 0x2D, "CP": 0x2F, "CR": 0x31}
+    _LEVEL_SCALE = {"CC": 10000.0, "CV": 1000.0, "CP": 1000.0, "CR": 1000.0}
+
+    _STATUS = {0x80: "OK", 0x90: "校验和错误", 0xA0: "参数超出仪器范围",
+               0xB0: "命令无法执行", 0xC0: "非法命令"}
+
+    def __init__(self, port: str, baud: int = 4800, timeout: float = 1.2):
+        if not HAS_SERIAL:
+            raise InstrumentError("未安装 pyserial, 无法使用真实串口 (可先用模拟模式)")
+        if not baud:
+            baud = 4800
+        self.lock = threading.RLock()
+        try:
+            self.ser = serial.Serial(port=port, baudrate=baud,
+                                     bytesize=serial.EIGHTBITS,
+                                     parity=serial.PARITY_NONE,
+                                     stopbits=serial.STOPBITS_ONE,
+                                     timeout=timeout, write_timeout=timeout)
+        except Exception as exc:  # noqa: BLE001
+            raise InstrumentError(f"打开串口 {port} 失败: {exc}") from exc
+        self._idn = ""
+        try:
+            self._send_raw(0x20, b"\x01")  # 远程模式 (未进远程时设置命令回 0xB0)
+            ident = self._exchange(0x6A)
+        except InstrumentError:
+            self.close()
+            raise
+        model = ident[3:8].decode("ascii", "ignore").split("\x00")[0]
+        sn = ident[10:20].decode("ascii", "ignore").strip("\x00 ")
+        fw = f"{ident[9]:02x}.{ident[8]:02x}"
+        self._idn = f"ITECH,IT{model},SN:{sn},FW:{fw}"
+
+    # ---- 帧层 ----
+    @staticmethod
+    def _frame(cmd: int, payload: bytes = b"", addr: int = 0) -> bytes:
+        f = bytearray([0xAA, addr, cmd])
+        f.extend(payload)
+        f.extend(bytes(26 - 1 - len(f)))
+        f.append(sum(f) % 256)
+        return bytes(f)
+
+    def _exchange(self, cmd: int, payload: bytes = b"") -> bytearray:
+        """发送一帧并接收 26 字节应答; 校验头/回显/校验和。
+
+        应答有两种形态 (2026-11-02 真机确认):
+          设置类 ACK: AA <addr> 0x12 <status> ...  (不回显原命令码)
+          查询类响应: AA <addr> <cmd> <data> ...   (回显原命令码)
+        """
+        with self.lock:
+            try:
+                self.ser.reset_input_buffer()
+                self.ser.write(self._frame(cmd, payload))
+                self.ser.flush()
+                raw = self.ser.read(26)
+            except Exception as exc:  # noqa: BLE001
+                raise InstrumentError(f"串口收发失败 [{cmd:#04x}]: {exc}") from exc
+            if len(raw) != 26 or raw[0] != 0xAA:
+                got = raw.hex() if raw else "(空)"
+                raise InstrumentError(
+                    f"仪器无有效应答 [{cmd:#04x}] (got {got})。"
+                    f"IT8510 老款默认 4800bps, 请核对波特率/接线/地址")
+            if raw[2] != cmd and not (raw[2] == 0x12 and len(payload) > 0):
+                raise InstrumentError(
+                    f"应答命令码不符 [{cmd:#04x}]: got {raw[2]:#04x}")
+            if (sum(raw[:25]) % 256) != raw[25]:
+                raise InstrumentError(f"应答校验和错误 [{cmd:#04x}]: {raw.hex()}")
+            return raw
+
+    def _send_raw(self, cmd: int, payload: bytes = b"") -> None:
+        """设置类命令: 校验 ACK 状态码。"""
+        r = self._exchange(cmd, payload)
+        status = r[3]
+        if status != 0x80:
+            raise InstrumentError(
+                f"仪器拒绝 [{cmd:#04x}]: {self._STATUS.get(status, hex(status))}")
+
+    def _get_int(self, cmd: int, n: int = 4) -> int:
+        r = self._exchange(cmd)
+        return int.from_bytes(r[3:3 + n], "little")
+
+    # ---- 对外接口 (与 IT8511A 保持同签名) ----
+    @property
+    def idn(self) -> str:
+        return self._idn
+
+    def set_mode(self, mode: str) -> None:
+        if mode not in self._MODE_CODE:
+            raise InstrumentError(f"非法模式: {mode}")
+        self._send_raw(0x28, bytes([self._MODE_CODE[mode]]))
+
+    def set_level(self, mode: str, value: float) -> None:
+        cmd = self._LEVEL_SET.get(mode)
+        if not cmd:
+            raise InstrumentError(f"非法模式: {mode}")
+        raw = int(round(value * self._LEVEL_SCALE[mode]))
+        self._send_raw(cmd, int(raw).to_bytes(4, "little"))
+
+    def set_input(self, on: bool) -> None:
+        self._send_raw(0x21, b"\x01" if on else b"\x00")
+
+    def measure(self) -> tuple[float, float, float]:
+        r = self._exchange(0x5F)
+        v_mV, i_uA, p_mW = int.from_bytes(r[3:7], "little"), \
+            int.from_bytes(r[7:11], "little"), int.from_bytes(r[11:15], "little")
+        return v_mV / 1000.0, i_uA / 10000.0, p_mW / 1000.0
+
+    def selftest_lines(self) -> list[str]:
+        """老协议自检: 逐项查询, SCPI 标签 + 老协议命令码对照。"""
+        out = [f"*IDN?(0x6A) → {self._idn}"]
+        mode = self._MODE_NAME.get(self._get_int(0x29, 1), "?")
+        out.append(f"FUNC?(0x29) → {mode}")
+        out.append(f"CURR?(0x2B) → {self._get_int(0x2B) / 10000.0:.4f} A")
+        out.append(f"maxV?(0x23) → {self._get_int(0x23) / 1000.0:.1f} V")
+        out.append(f"maxI?(0x25) → {self._get_int(0x25) / 10000.0:.1f} A")
+        out.append(f"maxP?(0x27) → {self._get_int(0x27) / 1000.0:.1f} W")
+        v, i, p = self.measure()
+        out.append(f"MEAS(0x5F) → V={v:.4f} I={i:.4f} P={p:.4f}")
+        return out
+
+    def raw_query(self, cmd: str) -> str:
+        raise InstrumentError("IT8510(老款)为二进制协议, 不支持 SCPI 文本查询, 自检请用专用流程")
+
+    def local(self) -> None:
+        try:
+            self._send_raw(0x20, b"\x00")  # 交还面板控制
+        except Exception:  # noqa: BLE001
+            pass
+
+    def close(self) -> None:
+        try:
+            self.ser.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # 型号注册表: 前端"添加仪器"对话框与后端量程校验共用
 LOAD_MODEL_SPECS = {
     "IT8511A+": {"max_v": 150.0, "max_i": 30.0, "max_p": 150.0, "max_r": 7500.0},
-    "IT8510": {"max_v": 120.0, "max_i": 30.0, "max_p": 300.0, "max_r": 7500.0},
+    "IT8510": {"max_v": 120.0, "max_i": 20.0, "max_p": 120.0, "max_r": 4000.0},
 }
 LOAD_DRIVERS = {
     "IT8511A+": IT8511A,
-    "IT8510": IT8510,
+    "IT8510": IT8510Legacy,
 }
 POWER_MODEL_SPECS = {
     "IT6302": {"channels": 3},
