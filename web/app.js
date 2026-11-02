@@ -1079,8 +1079,8 @@ function renderPowerPanel(st, d) {
     const [v, i, pw] = cardPoint(d, o);
     card.classList.toggle('active', on);
     card.querySelector('[data-k="v"]').textContent = Number(v).toFixed(3);
-    card.querySelector('[data-k="i"]').textContent = Number(i).toFixed(3);
-    card.querySelector('[data-k="p"]').textContent = Number(pw).toFixed(2);
+    card.querySelector('[data-k="i"]').textContent = fmtI(i);
+    card.querySelector('[data-k="p"]').textContent = fmtP(pw);
 
     const occ = card.querySelector('.occupy-tag');
     if (occ) occ.hidden = !occupied;
@@ -1099,7 +1099,7 @@ function renderPowerPanel(st, d) {
     if (on) onCount += 1;
   });
 
-  $('.sum-total', sec).textContent = total.toFixed(2);
+  $('.sum-total', sec).textContent = fmtP(total);
   $('.oncount', sec).textContent = onCount;
   $('.ontotal', sec).textContent = ` / ${outs.length} 路`;
 
@@ -1205,6 +1205,18 @@ function fmtClock(t) {
   return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
 
+/* 电流/功率显示：小值自动加位，避免 0.0002A/0.003W 被显示成 0.000/0.00 */
+function fmtI(x) {
+  if (x == null || !isFinite(x)) return '—';
+  const a = Math.abs(Number(x));
+  return a > 0 && a < 0.001 ? Number(x).toFixed(4) : Number(x).toFixed(3);
+}
+function fmtP(x) {
+  if (x == null || !isFinite(x)) return '—';
+  const a = Math.abs(Number(x));
+  return a > 0 && a < 0.01 ? Number(x).toFixed(3) : Number(x).toFixed(2);
+}
+
 function rowsHtml(rows, get, t0) {
   if (!rows.length) return '<tr><td colspan="4" class="td-empty">—</td></tr>';
   const f = (x, d) => (x == null ? '—' : Number(x).toFixed(d));
@@ -1212,8 +1224,8 @@ function rowsHtml(rows, get, t0) {
     const a = get ? get(h) : null;
     return '<tr><td>' + fmtClock(h.t) + '</td>'
       + '<td class="col-v">' + f(a ? a[0] : null, 3) + '</td>'
-      + '<td class="col-i">' + f(a ? a[1] : null, 3) + '</td>'
-      + '<td class="col-p">' + f(a ? a[2] : null, 2) + '</td></tr>';
+      + '<td class="col-i">' + fmtI(a ? a[1] : null) + '</td>'
+      + '<td class="col-p">' + fmtP(a ? a[2] : null) + '</td></tr>';
   }).join('');
 }
 
