@@ -102,7 +102,9 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-03（v78）**：修目录选择弹窗两个 UI 问题（用户反馈）。①弹窗被「开始记录」盖住——dir-mask 在 DOM 中排在 rec-mask 之前、同为 z-index:200，后者覆盖前者 → #dir-mask z-index 提到 220；②「选择目录」按钮文字溢出——tiny 按钮在 .row flex 里被压缩 → button.tiny 加 flex:0 0 auto + white-space:nowrap。另向用户说明：浏览器模式因安全模型无法调用系统原生目录对话框（拿不到本地完整路径），桌面版走 pywebview 原生对话框，浏览器模式只能用自制目录浏览弹窗。?v=78。
 
-## 六、当前状态（v78）
+- **2026-11-03（v78 打包）**：重新打包 dist/ITECH测试台.exe（PyInstaller onefile，13.2MB，内嵌 web v78 界面），含 v56~v78 全部更新（IT8510 老协议、真机精度链路、统一格线系统、目录选择器、按钮/弹窗修复）。启动冒烟通过（进程存活、窗口正常）。exe 不入库（.gitignore 排除 dist/）。
+
+## 六、当前状态（v78 打包）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
 - 另有一份工作副本 `C:/Users/liwanxin/WorkBuddy/2026-10-28-22-40-24/itech-bench`（WorkBuddy 工作区，已同步 v64 修复；D:/easyCode 不在本机，两处改动需经 GitHub 同步）。
