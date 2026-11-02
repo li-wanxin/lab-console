@@ -12,3 +12,6 @@ build/
 # 临时截图（tools 下的验证截图）
 tools/shot_*.png
 tools/crop_*.png
+
+# 程序目录下导出的记录数据
+/*.csv
