@@ -1966,7 +1966,9 @@ function bind() {
       const sec = card.closest('.view');
       const devId = sec.dataset.view;
       const chs = card.dataset.chs.split(',').map(Number);
-      const m = comboMeta(devId);
+      // 只看这张卡本身是不是组合卡（.combo），不能按视图判断——
+      // 组合视图里的 CH3 等非成员卡仍是单路卡，走错分支会误弹接线指引/误分解设定
+      const m = card.classList.contains('combo') ? comboMeta(devId) : null;
 
       if (t.matches('[data-out]')) {
         const on = t.checked;

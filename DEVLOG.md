@@ -58,9 +58,12 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 - **2026-11-02（v56）**：**IT8510 真机接入，发现是老款非"+"机型，重写驱动**。用户接上 IT8510（IT-E122/CH343 → COM19）后 SCPI 全波特率无响应；用 Blinkinlabs/itech_usb_serial 参考实现探测确认：26 字节二进制私有协议、默认 4800bps（S/N 3797370020, FW 01.90）。**量程同步修正**：原界面 120V/30A/300W 是错的（那是 IT8512 的规格），官方规格书 + 真机拒绝法实测为 **120V/20A/120W**（保护设定上限 130W，CR 最高 4000Ω，CC 分辨率 0.1mA；maxI=30A/maxP=300W 被仪器 ERR-param 拒绝）。改动：instruments.py 新增 `IT8510Legacy`（帧 AA+addr+cmd+payload+cksum，设置类 ACK 回 0x12+状态码 0x80/0xA0/0xB0，查询类回显命令码，必须先发 0x20=1 远程模式）；app.py 连接分支按 `LEGACY_SERIAL` 标志直接 (port,baud) 构造、自检走 `selftest_lines()` 专用流程；连接后 meta 记录实际 baud 并同步前端 `S.cfg` 回显（修复连接设置面板不回显实际端口/波特率）；`?v=56`。验证：通信自检 PASS（IDN/模式/设定/保护限/测量全查询成功）、CC 设定 1.5A 仪器回读确认、输入 ON/OFF 正常、轮询无错误。空载测量 V/I/P=0 为正确现象（输入端未接电源）。
 - **2026-11-02（v57~v63）**：**波特率按型号限制 + 侧栏仪器条目改版**。用户要求把 8510 用不到的波特率档删掉，并排查其他型号同类坑。查证：三台仪器**都不支持 115200**（原下拉第一项，最易踩）；IT8510 老款仅 4800；IT8511A+ 4800/9600/19200/38400（IT8500+ 手册）；IT6302 4800/9600/38400（无 19200）。改动：instruments.py 注册表加 `baud_rates`/`baud_default`；app.py snapshot 暴露 `model_specs`；前端 `fillBaudSelect()` 按当前型号渲染下拉、型号切换自动带默认值、移除全部硬编码 9600。随后按用户要求侧栏改版：`devEntryHtml` 名称同行右侧加**型号徽章**（`.dev-model`），副行完整规格（电源"3通道 · 30V/3A"，负载"120V 20A 120W"），悬停 tooltip 详述（CH3 5V/3A、CC/CV/CR/CP）。CSS 迭代多轮：名称被 flex 压竖排（裸文本节点包 `.dev-name` span 禁收缩）、徽章被压成"IT…"（两条 .dev-model 规则冲突，flex-shrink:1 覆盖 0，合并为 0）、规格单行截断改 `-webkit-line-clamp:2` 折行。截图验收通过；`?v=63`。提交 0683d30。
 
-## 六、当前状态（v63）
+- **2026-11-02 晚（v64）**：**修复组合模式下非成员通道误走组合分支的 bug**（用户反馈：CH1+CH2 串联输出时开 CH3 也弹"需先关闭 CH1/CH2"）。根因：change 委托里 `comboMeta(devId)` 按**视图**判断而非按**被点卡片**判断——组合视图里 CH3 是单路卡却被当组合卡，导致：①开 CH3 误弹接线指引；②**改 CH3 设定会被错误分解写到 CH1/CH2**（更严重的隐藏 bug）；③关 CH3 会误清 comboLive。修复：`m = card.classList.contains('combo') ? comboMeta(devId) : null`（按卡片 .combo class 判断）。验证：探针拦截 api（放行 /api/status 保页面状态机）——组合接通后开 CH3 无弹窗直达 output{ch:3}、改 CH3 设定仅下发 set{ch:3}、CH3 开关不清 comboLive、组合卡自身开启仍正常弹接线指引。`?v=64`。
+
+## 六、当前状态（v64）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
+- 另有一份工作副本 `C:/Users/liwanxin/WorkBuddy/2026-10-28-22-40-24/itech-bench`（WorkBuddy 工作区，已同步 v64 修复；D:/easyCode 不在本机，两处改动需经 GitHub 同步）。
 - 设备清单：电源1（IT6302，未连接）+ 负载1（IT8510 型号）。**IT8510 真机已验证**（COM19@4800，自检 PASS、CC 设定回读、输入开关均正常）；服务重启后设备清单重置，重连即可（波特率下拉现在只给 4800，选不错）。
 - 波特率下拉已按型号限制（v57~v63）：IT8510 仅 4800；IT8511A+/IT6302 无 115200。
 - IT6302 电源侧真机仍未验证；`dist/` exe 是旧界面，未重新打包。
