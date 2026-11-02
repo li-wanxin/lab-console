@@ -698,12 +698,12 @@ main {
   background: var(--cell);
   font-weight: 500; font-size: 12px; color: #8b9db0;
   letter-spacing: .5px; text-align: left;
-  padding: 4px 10px 3px; border-bottom: 1px solid var(--inset);
+  padding: 4px 5px 3px; border-bottom: 1px solid var(--inset);
 }
 .cell-table th:first-child { text-align: left; }
 .cell-table td {
   font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums;
-  text-align: left; padding: 3px 10px; color: var(--text-soft);
+  text-align: left; padding: 3px 5px; color: var(--text-soft);
   border-bottom: 1px solid var(--row-line);
 }
 .cell-table td:first-child { text-align: left; color: var(--dim); }

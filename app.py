@@ -50,7 +50,8 @@ WEB_DIR = BASE_DIR / "web"
 
 POLL_INTERVAL = 0.8          # 轮询周期 (秒)
 HISTORY_POINTS = 20000       # 数据缓存点数 (约 4.4 小时 @0.8s)
-CHART_POINTS = 360           # 界面曲线只取最近这么多点
+CHART_POINTS = 360           # 界面曲线降采样上限（全量历史均匀取点）
+TABLE_POINTS = 200           # 数据表取最近这么多原始点
 
 
 # --------------------------------------------------------------------------- #
@@ -848,7 +849,17 @@ class Bench:
     # ---------------- 快照 ----------------
     def snapshot(self) -> dict:
         with self.lock:
-            hist = list(self.history)[-CHART_POINTS:]
+            raw = list(self.history)
+            # 曲线数据：对全量历史均匀降采样到 CHART_POINTS → 横轴时间跨度随记录
+            # 时长自动扩展（时间缩放），老数据不会被"刷掉"；表格数据另给最近原始行
+            if len(raw) > CHART_POINTS:
+                step = -(-len(raw) // CHART_POINTS)          # ceil 整除
+                chart = raw[::step]
+                if chart[-1] is not raw[-1]:
+                    chart.append(raw[-1])                    # 末点保持实时
+            else:
+                chart = raw
+            recent = raw[-TABLE_POINTS:]
             return {
                 "ts": time.time(),
                 "devices": [d.payload() for d in self.devices.values()],
@@ -862,8 +873,9 @@ class Bench:
                                  "baud_default": s.get("baud_default", 9600)}
                              for m, s in LOAD_MODEL_SPECS.items()},
                 },
-                "history": hist,
-                "buffered": len(self.history),
+                "history": chart,
+                "recent": recent,
+                "buffered": len(raw),
                 "alerts": list(self.alerts)[:30],
                 "sweep": self.sweep,
                 "recordings": self._rec_list(),

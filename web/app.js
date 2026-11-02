@@ -377,9 +377,9 @@ function plot(canvas, cfg) {
   const anyRight = panels.some(p => p.series.some(s => s.axis === 'right'));
   const anyR2 = panels.some(p => p.series.some(s => s.axis === 'right2'));
   const padL = 42;
-  // 双右轴时电流刻度在最外侧（pw+54 起笔），需给足宽度，否则小数标签被画布裁掉
-  const padR = (anyRight && anyR2) ? 108 : ((anyRight || anyR2) ? 54 : 10);
-  const padT = 2;
+  // 右侧只有一列刻度（功率上/电流下同列左对齐），64px 足够 8 位数字
+  const padR = (anyRight || anyR2) ? 64 : 10;
+  const padT = 16;   // 顶部留白放轴单位，避免与最上面的刻度值重叠
   const padB = 18;
   const gap = cfg.gap != null ? cfg.gap : 12;
   const band = 13;
@@ -410,14 +410,16 @@ function plot(canvas, cfg) {
     ctx.stroke();
   });
 
-  // 轴单位（cfg.units = {l, r, r2}）
+  // 轴单位：画在绘图区上缘之外（padT-4），与刻度值完全分离
+  // 右侧功率/电流刻度合并为一列，单位也随之合并（如 "A/W"）
   const units = cfg.units || {};
-  if (units.l || (units.r && anyRight) || (units.r2 && anyR2)) {
+  const rUnits = [(units.r && anyRight) ? units.r : '', (units.r2 && anyR2) ? units.r2 : '']
+    .filter(Boolean).join('/');
+  if (units.l || rUnits) {
     ctx.fillStyle = pal.unit;
     ctx.font = '10.5px "JetBrains Mono", Consolas, monospace';
-    if (units.l) { ctx.textAlign = 'right'; ctx.fillText(units.l, padL - 6, padT + 6.5); }
-    if (units.r && anyRight) { ctx.textAlign = 'left'; ctx.fillText(units.r, padL + pw + (anyR2 ? 54 : 7), padT + 6.5); }
-    if (units.r2 && anyR2) { ctx.textAlign = 'left'; ctx.fillText(units.r2, padL + pw + 7, padT + 6.5); }
+    if (units.l) { ctx.textAlign = 'right'; ctx.fillText(units.l, padL - 6, padT - 4); }
+    if (rUnits) { ctx.textAlign = 'left'; ctx.fillText(rUnits, padL + pw + 7, padT - 4); }
     ctx.font = '11.5px "JetBrains Mono", Consolas, monospace';
   }
 
@@ -474,7 +476,8 @@ function plot(canvas, cfg) {
       ctx.stroke();
       ctx.fillText(fmt(v, lt.step), padL - 6, y);
     });
-    // 右侧刻度与格线严格对齐：同一条格线，上方标功率值（橙）、下方标电流值（青），
+    // 右侧刻度与格线严格对齐：同一列（x=padL+pw+7 左对齐），
+    // 同一条格线上方标功率值（橙）、下方标电流值（青），
     // 值由该 y 在各自轴量程上反算，保证"数字 ↔ 格线 ↔ 曲线"三者可对读
     if (right.length || r2.length) {
       const spanY = yB - yT;
@@ -483,15 +486,15 @@ function plot(canvas, cfg) {
       lt.vals.forEach(v => {
         const y = Math.round(LY(v));
         if (y < yT - 2 || y > yB + 2) return;
-        if (right.length) {
-          ctx.fillStyle = p.rc || pal.label;
-          ctx.textAlign = 'left';
-          ctx.fillText(fmt(curAt(y), rt.step), padL + pw + (r2.length ? 54 : 7), y + 9);
-        }
         if (r2.length) {
           ctx.fillStyle = p.wc || pal.label;
           ctx.textAlign = 'left';
           ctx.fillText(fmt(powAt(y), r2t.step), padL + pw + 7, y - 9);
+        }
+        if (right.length) {
+          ctx.fillStyle = p.rc || pal.label;
+          ctx.textAlign = 'left';
+          ctx.fillText(fmt(curAt(y), rt.step), padL + pw + 7, y + 9);
         }
       });
     }
@@ -1343,8 +1346,10 @@ function renderPowerCurves(st) {
         stEl.className = 'cell-state' + (on ? ' on' : (occupied ? ' occ' : ''));
       }
       if (cd.tbody) {
-        cd.tbody.innerHTML = rowsHtml(sampleRows(hist, 200),
-          h => combinedPoint(histPayload(h, d.id), o), hist.length ? hist[0].t : 0);
+        // 表格用最近的原始点（recent），曲线才用降采样后的 history
+        const recent = (st.recent && st.recent.length) ? st.recent : hist;
+        cd.tbody.innerHTML = rowsHtml(sampleRows(recent, 200),
+          h => combinedPoint(histPayload(h, d.id), o), recent.length ? recent[0].t : 0);
       }
       if (hist.length < 2) {
         const ctx = cv.getContext('2d');
@@ -1403,7 +1408,8 @@ function renderLoadCurves(st) {
     const tip = $('.curve-single .empty-tip', sec);
     const winEl = $('.curve-win', sec);
     const ltb = $('.load-table tbody', sec);
-    if (ltb) ltb.innerHTML = rowsHtml(sampleRows(hist, 200), h => histPayload(h, d.id).load, hist[0].t);
+    const recent = (st.recent && st.recent.length) ? st.recent : hist;
+    if (ltb) ltb.innerHTML = rowsHtml(sampleRows(recent, 200), h => histPayload(h, d.id).load, recent.length ? recent[0].t : 0);
 
     if (hist.length < 2) {
       const ctx = canvas.getContext('2d');
