@@ -488,29 +488,33 @@ function plot(canvas, cfg) {
       ctx.fillText(fmt(v, lt.step), padL - 6, y);
     });
     // 右侧刻度与格线严格对齐：同一列（x=padL+pw+7 左对齐），
-    // 同一条格线上方标功率值（橙）、下方标电流值（青），
-    // 值由该 y 在各自轴量程上反算，保证"数字 ↔ 格线 ↔ 曲线"三者可对读。
-    // 小数位按"相邻格线的实际数值间隔"决定（而非轴自身刻度步长），
-    // 否则间隔比步长细时两个不同值会舍入成同一个标签（如连续两个 0.004）
+    // 右侧刻度：像左轴一样取整齐的整数间隔（0.001/0.002…），画在自己轴的真实高度，
+    // 同列左对齐（功率橙/电流青）；两组标签位置太近时功率让位，避免文字重叠
     if (right.length || r2.length) {
-      const spanY = yB - yT;
-      const curAt = y => rt.lo + (yB - y) / spanY * (rt.hi - rt.lo);
-      const powAt = y => r2t ? r2t.lo + (yB - y) / spanY * (r2t.hi - r2t.lo) : 0;
-      const ys = lt.vals.map(v => Math.round(LY(v))).filter(y => y >= yT - 2 && y <= yB + 2);
-      const yGap = ys.length > 1 ? Math.abs(ys[1] - ys[0]) : spanY / 4;
-      const curStep = Math.abs(curAt(yT) - curAt(yT + yGap)) || rt.step;
-      const powStep = r2t ? (Math.abs(powAt(yT) - powAt(yT + yGap)) || r2t.step) : 1;
-      ys.forEach(y => {
-        if (r2.length) {
-          ctx.fillStyle = p.wc || pal.label;
-          ctx.textAlign = 'left';
-          ctx.fillText(fmtPrec(powAt(y), powStep), padL + pw + 7, y - 9);
-        }
-        if (right.length) {
-          ctx.fillStyle = p.rc || pal.label;
-          ctx.textAlign = 'left';
-          ctx.fillText(fmtPrec(curAt(y), curStep), padL + pw + 7, y + 9);
-        }
+      const curYs = [];
+      const powYs = [];
+      if (right.length) {
+        rt.vals.forEach(v => {
+          const y = Math.round(RY(v));
+          if (y >= yT - 2 && y <= yB + 2) curYs.push([v, y]);
+        });
+      }
+      if (r2.length) {
+        r2t.vals.forEach(v => {
+          const y = Math.round(R2Y(v));
+          if (y >= yT - 2 && y <= yB + 2) powYs.push([v, y]);
+        });
+      }
+      const nearCur = y => curYs.some(([, yy]) => Math.abs(yy - y) < 11);
+      ctx.textAlign = 'left';
+      powYs.forEach(([v, y]) => {
+        if (nearCur(y)) return;
+        ctx.fillStyle = p.wc || pal.label;
+        ctx.fillText(fmt(v, r2t.step), padL + pw + 7, y);
+      });
+      curYs.forEach(([v, y]) => {
+        ctx.fillStyle = p.rc || pal.label;
+        ctx.fillText(fmt(v, rt.step), padL + pw + 7, y);
       });
     }
 
