@@ -489,7 +489,8 @@ function plot(canvas, cfg) {
     });
     // 右侧刻度与格线严格对齐：同一列（x=padL+pw+7 左对齐），
     // 右侧刻度：像左轴一样取整齐的整数间隔（0.001/0.002…），画在自己轴的真实高度，
-    // 同列左对齐（功率橙/电流青）；两组标签位置太近时功率让位，避免文字重叠
+    // 同列左对齐（功率橙/电流青）；右缘画同色短刻度线作为数值锚点；
+    // 两组标签位置太近时上下错开（功率上移/电流下移），保证两组都可见
     if (right.length || r2.length) {
       const curYs = [];
       const powYs = [];
@@ -505,16 +506,26 @@ function plot(canvas, cfg) {
           if (y >= yT - 2 && y <= yB + 2) powYs.push([v, y]);
         });
       }
-      const nearCur = y => curYs.some(([, yy]) => Math.abs(yy - y) < 11);
+      const near = (y, arr) => arr.some(([, yy]) => Math.abs(yy - y) < 11);
+      // 右缘短刻度线（4px，同色）：数值的视觉锚点
+      ctx.lineWidth = 1;
+      const tick = (y, color) => {
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(padL + pw - 4, y + 0.5);
+        ctx.lineTo(padL + pw, y + 0.5);
+        ctx.stroke();
+      };
+      curYs.forEach(([, y]) => tick(y, p.rc || pal.label));
+      powYs.forEach(([, y]) => tick(y, p.wc || pal.label));
       ctx.textAlign = 'left';
       powYs.forEach(([v, y]) => {
-        if (nearCur(y)) return;
         ctx.fillStyle = p.wc || pal.label;
-        ctx.fillText(fmt(v, r2t.step), padL + pw + 7, y);
+        ctx.fillText(fmt(v, r2t.step), padL + pw + 7, near(y, curYs) ? y - 9 : y);
       });
       curYs.forEach(([v, y]) => {
         ctx.fillStyle = p.rc || pal.label;
-        ctx.fillText(fmt(v, rt.step), padL + pw + 7, y);
+        ctx.fillText(fmt(v, rt.step), padL + pw + 7, near(y, powYs) ? y + 9 : y);
       });
     }
 
