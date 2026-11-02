@@ -672,18 +672,28 @@ function escapeHtml(s) {
 
 /* 侧栏仪器条目 */
 function devEntryHtml(d) {
-  const spec = d.role === 'power' ? 'CH1–CH3' : (d.range ? d.range.max_p + 'W' : '');
-  return `<button type="button" class="dev" data-dev="${d.id}" data-role="${d.role}" draggable="true" title="点击打开视图，拖动可调整顺序">
+  // 副行: 紧凑规格 (侧栏窄, 完整信息在 title 提示里)
+  let spec, tip;
+  if (d.role === 'power') {
+    const ch = (d.channels && Object.keys(d.channels).length) || 3;
+    spec = `${ch}通道 · 30V/3A`;
+    tip = `${ch} 通道直流电源 · CH1/CH2 30V/3A · CH3 5V/3A`;
+  } else if (d.range) {
+    spec = `${d.range.max_v}V ${d.range.max_i}A ${d.range.max_p}W`;
+    tip = `直流电子负载 · 量程 ${d.range.max_v}V / ${d.range.max_i}A / ${d.range.max_p}W · CC/CV/CR/CP`;
+  } else {
+    spec = ''; tip = '';
+  }
+  return `<button type="button" class="dev" data-dev="${d.id}" data-role="${d.role}" draggable="true" title="${tip}<br>点击打开视图，拖动可调整顺序">
     <span class="dev-ico">${d.role === 'power' ? 'P' : 'L'}</span>
     <span class="dev-txt">
-      <b>${escapeHtml(d.name)}</b>
-      <em>${d.model} · ${spec}</em>
+      <b><span class="dev-name">${escapeHtml(d.name)}</span><i class="dev-model">${d.model}</i></b>
+      <em>${spec}</em>
     </span>
     <span class="dev-state"><i class="dot"></i><s>未连接</s></span>
     <span class="dev-del" data-del="${d.id}" title="从清单删除该仪器">×</span>
   </button>`;
 }
-
 function bindDelBadge(d) {
   let timer = null;
   const dev = d.closest('.dev');
@@ -757,7 +767,7 @@ function renderNav(st) {
     });
     $$('#dev-list .dev-del').forEach(bindDelBadge);
     st.devices.forEach(d => {
-      if (!S.cfg[d.id]) S.cfg[d.id] = { port: '', baud: 9600 };
+      if (!S.cfg[d.id]) S.cfg[d.id] = { port: '', baud: 0 };
       // 已连接设备: 用后端报告的实际端口/波特率同步显示 (sim 除外)
       if (d.connected && !d.sim && d.port) {
         S.cfg[d.id].port = d.port;
@@ -825,8 +835,8 @@ function setView(id) {
       sel.innerHTML = ((STATUS.models || {}).load || []).map(m => `<option>${m}</option>`).join('');
       sel.value = dev.model;
     }
-    S.cfg[id] = S.cfg[id] || { port: '', baud: 9600 };
-    $('#dev-baud').value = String(S.cfg[id].baud);
+    S.cfg[id] = S.cfg[id] || { port: '', baud: 0 };
+    fillBaudSelect();
     fillPortSelect();
   } else if (STATUS) {
     renderLink(STATUS);
@@ -1551,6 +1561,27 @@ function fillPortSelect() {
   }
 }
 
+// 波特率下拉按当前设备型号渲染 (型号支持的档位来自后端 model_specs;
+// IT8510 老款仅 4800, IT8500+ 系列无 115200, IT6302 无 115200/19200)
+function modelSpec(dev) {
+  if (!dev) return null;
+  return ((STATUS || {}).model_specs || {})[dev.role]?.[dev.model] || null;
+}
+
+function fillBaudSelect() {
+  const sel = $('#dev-baud');
+  const dev = curDev();
+  const cfg = dev ? (S.cfg[dev.id] || {}) : {};
+  const spec = modelSpec(dev);
+  const rates = (spec && spec.baud_rates?.length) ? spec.baud_rates : [4800, 9600, 19200, 38400];
+  const defBaud = spec?.baud_default || rates[0];
+  sel.innerHTML = rates.map(b => `<option value="${b}">${b}</option>`).join('');
+  // 上次记住的波特率仍在该型号支持列表内则沿用, 否则取型号默认
+  const want = cfg.baud && rates.includes(cfg.baud) ? cfg.baud : defBaud;
+  sel.value = String(want);
+  if (dev) S.cfg[dev.id].baud = want;
+}
+
 async function refreshPorts(notify) {
   try {
     const r = await api('/api/ports');
@@ -2082,13 +2113,20 @@ function bind() {
     const dev = curDev();
     if (dev) S.cfg[dev.id].baud = parseInt(ev.target.value, 10);
   };
+  $('#dev-model').onchange = () => {
+    // 换型号: 波特率档位跟着型号变, 取该型号默认值
+    const dev = curDev();
+    if (!dev) return;
+    dev.model = $('#dev-model').value;
+    fillBaudSelect();
+  };
 
   $('#dev-connect').onclick = async () => {
     const dev = curDev();
     if (!dev) return;
-    const cfg = S.cfg[dev.id] || (S.cfg[dev.id] = { port: '', baud: 9600 });
+    const cfg = S.cfg[dev.id] || (S.cfg[dev.id] = { port: '', baud: 0 });
     const port = $('#dev-port').value || cfg.port;
-    const baud = parseInt($('#dev-baud').value, 10) || 9600;
+    const baud = parseInt($('#dev-baud').value, 10) || 0;
     if (!port && !$('#sim-mode').checked) return toast('请选择串口，或勾选模拟模式', true);
     try {
       await api('/api/connect', {

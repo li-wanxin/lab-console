@@ -382,16 +382,22 @@ class IT8510Legacy:
 
 
 # 型号注册表: 前端"添加仪器"对话框与后端量程校验共用
+# baud_rates: 该型号串口实际支持的波特率 (前端下拉据此渲染; 官方手册依据)
+#   IT8510 老款: 仅 4800 (2026-11-02 真机实测其他速率无响应)
+#   IT8500+ 系列 (IT8511A+): 4800/9600/19200/38400 (编程手册)
+#   IT6302: 4800/9600/38400 (用户手册 BAUD 菜单)
 LOAD_MODEL_SPECS = {
-    "IT8511A+": {"max_v": 150.0, "max_i": 30.0, "max_p": 150.0, "max_r": 7500.0},
-    "IT8510": {"max_v": 120.0, "max_i": 20.0, "max_p": 120.0, "max_r": 4000.0},
+    "IT8511A+": {"max_v": 150.0, "max_i": 30.0, "max_p": 150.0, "max_r": 7500.0,
+                 "baud_rates": [4800, 9600, 19200, 38400], "baud_default": 9600},
+    "IT8510": {"max_v": 120.0, "max_i": 20.0, "max_p": 120.0, "max_r": 4000.0,
+               "baud_rates": [4800], "baud_default": 4800},
 }
 LOAD_DRIVERS = {
     "IT8511A+": IT8511A,
     "IT8510": IT8510Legacy,
 }
 POWER_MODEL_SPECS = {
-    "IT6302": {"channels": 3},
+    "IT6302": {"channels": 3, "baud_rates": [4800, 9600, 38400], "baud_default": 9600},
 }
 MODEL_CATALOG = {
     "power": ["IT6302"],

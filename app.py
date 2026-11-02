@@ -34,6 +34,7 @@ from instruments import (
     LOAD_DRIVERS,
     LOAD_MODEL_SPECS,
     MODEL_CATALOG,
+    POWER_MODEL_SPECS,
     InstrumentError,
     SerialTransport,
     SimLoad,
@@ -846,6 +847,15 @@ class Bench:
                 "ts": time.time(),
                 "devices": [d.payload() for d in self.devices.values()],
                 "models": MODEL_CATALOG,
+                # 各型号串口能力: 前端波特率下拉据此按型号渲染
+                "model_specs": {
+                    "power": {m: {"baud_rates": s.get("baud_rates", []),
+                                  "baud_default": s.get("baud_default", 9600)}
+                              for m, s in POWER_MODEL_SPECS.items()},
+                    "load": {m: {"baud_rates": s.get("baud_rates", []),
+                                 "baud_default": s.get("baud_default", 9600)}
+                             for m, s in LOAD_MODEL_SPECS.items()},
+                },
                 "history": hist,
                 "buffered": len(self.history),
                 "alerts": list(self.alerts)[:30],
