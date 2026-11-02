@@ -1144,3 +1144,8 @@ html.light .occupy-tag { background: #fdf3df; border-color: #e5cd96; color: #a06
 .dir-list .dir-item:hover { background: var(--hover); color: var(--text-hi); }
 .dir-list .dir-item .ico { color: #f0b64f; font-size: 13px; }
 .dir-list .dir-empty { text-align: center; color: var(--dim-3); padding: 26px 0; font-size: 12px; }
+
+/* 目录选择弹窗压在「开始记录」之上 */
+#dir-mask { z-index: 220; }
+/* tiny 按钮防 flex 压缩导致文字溢出 */
+button.tiny { flex: 0 0 auto; white-space: nowrap; }
