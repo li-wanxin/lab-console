@@ -64,6 +64,7 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
 - 另有一份工作副本 `C:/Users/liwanxin/WorkBuddy/2026-10-28-22-40-24/itech-bench`（WorkBuddy 工作区，已同步 v64 修复；D:/easyCode 不在本机，两处改动需经 GitHub 同步）。
+- 另有一份工作副本 `C:/Users/liwanxin/WorkBuddy/2026-10-28-22-40-24/itech-bench`（WorkBuddy 工作区，已同步 v64 修复；D:/easyCode 不在本机，两处改动需经 GitHub 同步）。
 - 设备清单：电源1（IT6302，未连接）+ 负载1（IT8510 型号）。**IT8510 真机已验证**（COM19@4800，自检 PASS、CC 设定回读、输入开关均正常）；服务重启后设备清单重置，重连即可（波特率下拉现在只给 4800，选不错）。
 - 波特率下拉已按型号限制（v57~v63）：IT8510 仅 4800；IT8511A+/IT6302 无 115200。
 - IT6302 电源侧真机仍未验证；`dist/` exe 是旧界面，未重新打包。
