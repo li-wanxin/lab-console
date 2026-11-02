@@ -449,14 +449,30 @@ function plot(canvas, cfg) {
       }));
       return isFinite(mx) && mx > 0 ? mx : 1;
     };
-    const lt = fitTicks(cfg.ymax > 0 ? cfg.ymax : maxOf(left) * 1.16, ph, 26);
-    const rt = fitTicks(maxOf(right) * 1.16, ph, 26);
-    const r2t = r2.length ? fitTicks(maxOf(r2) * 1.16, ph, 26) : null;
     const yT = y0 + 5;
     const yB = y0 + ph - 5;
-    const LY = v => yB - (v - lt.lo) / (lt.hi - lt.lo) * (yB - yT);
-    const RY = v => yB - (v - rt.lo) / (rt.hi - rt.lo) * (yB - yT);
-    const R2Y = r2t ? v => yB - (v - r2t.lo) / (r2t.hi - r2t.lo) * (yB - yT) : RY;
+    const spanY = yB - yT;
+    // 统一格线系统：三轴共用 N 段格线，各轴量程 = N × 整数步长（1/2/2.5/5×10ⁿ）
+    // → 电压/电流/功率的刻度值都是整齐值，且全部精确落在同一条格线上。
+    // 每段不小于 30px：右侧功率(上)/电流(下)标签错开 18px 后仍留足间距
+    const N = Math.max(2, Math.min(6, Math.round(spanY / 30)));
+    const niceStep = maxV => {
+      const raw = (maxV > 0 ? maxV : 1) / N;
+      const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      const r = raw / mag;
+      const m = r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10;
+      return m * mag;
+    };
+    const mk = step => ({
+      lo: 0, hi: step * N, step,
+      vals: Array.from({ length: N + 1 }, (_, k) => step * k),
+    });
+    const lt = mk(niceStep(cfg.ymax > 0 ? cfg.ymax : maxOf(left) * 1.16));
+    const rt = mk(niceStep(maxOf(right) * 1.16));
+    const r2t = r2.length ? mk(niceStep(maxOf(r2) * 1.16)) : null;
+    const LY = v => yB - (v - lt.lo) / (lt.hi - lt.lo) * spanY;
+    const RY = v => yB - (v - rt.lo) / (rt.hi - rt.lo) * spanY;
+    const R2Y = r2t ? v => yB - (v - r2t.lo) / (r2t.hi - r2t.lo) * spanY : RY;
 
     if (p.label) {
       ctx.fillStyle = pal.label;
@@ -488,9 +504,8 @@ function plot(canvas, cfg) {
       ctx.fillText(fmt(v, lt.step), padL - 6, y);
     });
     // 右侧刻度与格线严格对齐：同一列（x=padL+pw+7 左对齐），
-    // 右侧刻度：像左轴一样取整齐的整数间隔（0.001/0.002…），画在自己轴的真实高度，
-    // 同列左对齐（功率橙/电流青）；右缘画同色短刻度线作为数值锚点；
-    // 两组标签位置太近时上下错开（功率上移/电流下移），保证两组都可见
+    // 右侧刻度：统一格线系统下刻度值全部落在格线上（与格线 y 严格对齐），
+    // 同列左对齐；同一条格线上功率标签在上（-9）、电流标签在下（+9）
     if (right.length || r2.length) {
       const curYs = [];
       const powYs = [];
@@ -506,7 +521,6 @@ function plot(canvas, cfg) {
           if (y >= yT - 2 && y <= yB + 2) powYs.push([v, y]);
         });
       }
-      const near = (y, arr) => arr.some(([, yy]) => Math.abs(yy - y) < 11);
       // 右缘短刻度线（4px，同色）：数值的视觉锚点
       ctx.lineWidth = 1;
       const tick = (y, color) => {
@@ -521,11 +535,11 @@ function plot(canvas, cfg) {
       ctx.textAlign = 'left';
       powYs.forEach(([v, y]) => {
         ctx.fillStyle = p.wc || pal.label;
-        ctx.fillText(fmt(v, r2t.step), padL + pw + 7, near(y, curYs) ? y - 9 : y);
+        ctx.fillText(fmt(v, r2t.step), padL + pw + 7, y - 9);
       });
       curYs.forEach(([v, y]) => {
         ctx.fillStyle = p.rc || pal.label;
-        ctx.fillText(fmt(v, rt.step), padL + pw + 7, near(y, powYs) ? y + 9 : y);
+        ctx.fillText(fmt(v, rt.step), padL + pw + 7, y + 9);
       });
     }
 
