@@ -27,6 +27,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
+APP_VERSION = "0.0.2"  # 版本单一定义处: 界面显示 / 打包 / Release 共用
+
 from instruments import (
     HAS_SERIAL,
     IT6302,
@@ -894,6 +896,7 @@ class Bench:
             recent = raw[-TABLE_POINTS:]
             return {
                 "ts": time.time(),
+                "version": APP_VERSION,
                 "devices": [d.payload() for d in self.devices.values()],
                 "models": MODEL_CATALOG,
                 # 各型号串口能力: 前端波特率下拉据此按型号渲染

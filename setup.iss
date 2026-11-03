@@ -1,9 +1,9 @@
-; Lab Console v1.0 安装包脚本（Inno Setup 6）
-; 编译: ISCC.exe setup.iss  ->  Output\LabConsole-Setup-v1.0.exe
+; Lab Console 安装包脚本（Inno Setup 6）
+; 编译: ISCC.exe setup.iss  ->  Output\LabConsole-Setup-v{版本}.exe
 
 #define MyAppName "Lab Console"
 #define MyAppNameZh "ITECH测试台"
-#define MyAppVersion "0.0.1"
+#define MyAppVersion "0.0.2"
 #define MyAppPublisher "li-wanxin"
 #define MyAppURL "https://github.com/li-wanxin/lab-console"
 #define MyAppExeName "LabConsole.exe"
@@ -27,9 +27,9 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
-VersionInfoVersion=0.0.1.0
+VersionInfoVersion=0.0.2.0
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion=0.0.1.0
+VersionInfoProductVersion=0.0.2.0
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked

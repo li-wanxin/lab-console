@@ -863,6 +863,9 @@ function renderNav(st) {
     const s = deviceState(d);
     return `<div class="pill ${s.cls}"><span class="dot"></span>${escapeHtml(d.name)} <b>${s.text}</b></div>`;
   }).join('');
+
+  const ver = $('#app-version');
+  if (ver && st.version) ver.textContent = 'v' + st.version;
 }
 
 function setView(id) {
