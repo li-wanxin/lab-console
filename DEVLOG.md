@@ -118,6 +118,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-04 凌晨（v81）**：应用户反馈回退 v80 第④项的前端部分——显示格式恢复为**固定 6 位小数补零**（fmtV/fmtI/fmtP 恢复 toFixed(6)，删 fmtFull；卡片实测 3 位、数据表 6 位、摘要行 2/3 位，全同 v79 样式）。保留：CW 命名、改设定自动关输入、IT8511A+ 波特率仅 9600、**后端数据不 round（全精度落库/CSV）**——只动显示层。index.html v=81。已提交 338c48c 推送。教训：用户对"显示 0 而非 0.000"很敏感，全精度≠去补零，显示格式变更必须先问。
 
+- **2026-11-04 凌晨（v0.0.2 发布）**：① 顶部标题旁新增**程序版本徽章**——app.py 新增 APP_VERSION="0.0.2" 常量并随 /api/status 下发 app_version 字段，前端 render() 渲染 #app-ver（样式 .app-ver 与徽章一致）。② setup.iss 升 0.0.2（MyAppVersion/VersionInfo*），PyInstaller 重打包 dist/ITECH测试台.exe（13.2MB，内嵌 v82 界面），ISCC 编译 Output/LabConsole-Setup-v0.0.2.exe（15MB）。③ GitHub Release v0.0.2：附件 LabConsole-Setup-v0.0.2.exe + LabConsole-Portable-v0.0.2.exe（便携版英文副本，中文文件名上传会被改名）。界面资源 v82。发布后注意：APP_VERSION 以后每次发版要同步改（与 setup.iss 一致）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
