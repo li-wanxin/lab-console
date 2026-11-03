@@ -106,6 +106,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-03（v0.0.1 发布）**：首个 GitHub Release。新增 Inno Setup 脚本 setup.iss（AppVersion 0.0.1，安装 LabConsole.exe 到 Program Files，开始菜单/桌面快捷方式/卸载，随装 README/DEVLOG），编译 Output/LabConsole-Setup-v0.0.1.exe（15MB）。Release: https://github.com/li-wanxin/lab-console/releases/tag/v0.0.1 附件 LabConsole-Setup-v0.0.1.exe（安装包）+ LabConsole-Portable-v0.0.1.exe（便携=原 ITECH测试台.exe）。工具链：winget 装 Inno Setup 6（本机 %LOCALAPPDATA%\Programs）与 gh CLI；gh 走系统代理 127.0.0.1:7890（GitHub HTTPS 直连被墙，SSH 22 直连可用）；gh auth login --web 设备码授权登录 li-wanxin。中文文件名附件 gh 上传会改名，用英文副本名上传。
 
+- **2026-11-03（v0.0.1 发布）**：首个 GitHub Release。新增 Inno Setup 脚本 setup.iss（AppVersion 0.0.1，安装 LabConsole.exe 到 Program Files，开始菜单/桌面快捷方式/卸载，随装 README/DEVLOG），编译 Output/LabConsole-Setup-v0.0.1.exe（15MB）。Release: https://github.com/li-wanxin/lab-console/releases/tag/v0.0.1 附件 LabConsole-Setup-v0.0.1.exe（安装包）+ LabConsole-Portable-v0.0.1.exe（便携=原 ITECH测试台.exe）。工具链：winget 装 Inno Setup 6（本机 %LOCALAPPDATA%\Programs）与 gh CLI；gh 走系统代理 127.0.0.1:7890（GitHub HTTPS 直连被墙，SSH 22 直连可用）；gh auth login --web 设备码授权登录 li-wanxin。中文文件名附件 gh 上传会改名，用英文副本名上传。
+
 ## 六、当前状态（v0.0.1 已发布）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
