@@ -1,5 +1,5 @@
-; Lab Console 安装包脚本（Inno Setup 6）
-; 编译: ISCC.exe setup.iss  ->  Output\LabConsole-Setup-v{版本}.exe
+; Lab Console v0.0.2 安装包脚本（Inno Setup 6）
+; 编译: ISCC.exe setup.iss  ->  Output\LabConsole-Setup-v1.0.exe
 
 #define MyAppName "Lab Console"
 #define MyAppNameZh "ITECH测试台"

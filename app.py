@@ -27,8 +27,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-APP_VERSION = "0.0.2"  # 版本单一定义处: 界面显示 / 打包 / Release 共用
-
 from instruments import (
     HAS_SERIAL,
     IT6302,
@@ -54,6 +52,9 @@ POLL_INTERVAL = 0.8          # 轮询周期 (秒)
 HISTORY_POINTS = 20000       # 数据缓存点数 (约 4.4 小时 @0.8s)
 CHART_POINTS = 360           # 界面曲线降采样上限（全量历史均匀取点）
 TABLE_POINTS = 200           # 数据表取最近这么多原始点
+
+# 程序版本（发布用, 与 setup.iss 的 MyAppVersion 保持一致）; 界面资源版本 v81
+APP_VERSION = "0.0.2"
 
 
 def list_dirs(p: str) -> dict:
@@ -896,7 +897,7 @@ class Bench:
             recent = raw[-TABLE_POINTS:]
             return {
                 "ts": time.time(),
-                "version": APP_VERSION,
+                "app_version": APP_VERSION,
                 "devices": [d.payload() for d in self.devices.values()],
                 "models": MODEL_CATALOG,
                 # 各型号串口能力: 前端波特率下拉据此按型号渲染

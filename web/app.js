@@ -863,9 +863,6 @@ function renderNav(st) {
     const s = deviceState(d);
     return `<div class="pill ${s.cls}"><span class="dot"></span>${escapeHtml(d.name)} <b>${s.text}</b></div>`;
   }).join('');
-
-  const ver = $('#app-version');
-  if (ver && st.version) ver.textContent = 'v' + st.version;
 }
 
 function setView(id) {
@@ -1584,6 +1581,8 @@ let STATUS = null;
 function render(st) {
   STATUS = st;
   S.ports = st.ports || [];
+  const verEl = $('#app-ver');
+  if (verEl && st.app_version) verEl.textContent = 'v' + st.app_version;
   ensurePanels(st);
   if (!S.booted) {
     S.booted = true;

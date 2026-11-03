@@ -391,6 +391,17 @@ button.tiny { height: 26px; padding: 0 10px; font-size: 11.5px; }
 .badge.ok { color: var(--ok); border-color: #1c4540; background: #10211f; }
 .badge.warn { color: var(--warn); border-color: #4a3819; background: #1f1a10; }
 
+/* 标题旁的程序版本徽章 */
+.app-ver {
+  display: inline-flex; align-items: center;
+  height: 17px; padding: 0 7px; margin-left: 6px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel-2);
+  font-size: 10px; font-weight: 500; color: var(--dim-2);
+  font-family: var(--mono);
+  vertical-align: 2px;
+}
+
 /* ==================== 右栏视图 ==================== */
 main {
   min-width: 0;
@@ -1149,17 +1160,3 @@ html.light .occupy-tag { background: #fdf3df; border-color: #e5cd96; color: #a06
 #dir-mask { z-index: 220; }
 /* tiny 按钮防 flex 压缩导致文字溢出 */
 button.tiny { flex: 0 0 auto; white-space: nowrap; }
-
-
-/* 顶栏版本徽章 */
-.ver-tag {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--dim-1);
-  vertical-align: 1px;
-  user-select: text;
-}

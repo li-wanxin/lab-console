@@ -116,6 +116,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 - **2026-11-03 深夜：IT8511A+ SCPI 实机验证（应雪验证，结论：不支持）**。用户提供《IT8500plus Programming Guide-CN - SCPI.pdf》要求再试 SCPI。实测（COM8=CH343 IT-E122，负载 TTL 单线半双工，RX 有 TX 回环，响应偶发 ~2/6）：\*IDN? 在 9600/4800/19200/38400 x {\n,\r,\r\n} x 多轮重试全部无响应；同链路帧协议 0x20 0x5F 读版本帧有响应（AA 00 12 90 00 01 5F 2A 0D，响应 cmd=0x12）。SYST:REM 前置也无效。手册无协议切换菜单说明；EEVblog 同机型用户证实 TTL 口只有私有帧协议。结论：该机（FW 01.46）串口仅支持 IT8500 帧协议，SCPI 手册适用于带原生 USB/RS232 的新机型（IT8513B+/IT8514+/IT8516C+ 等）或需升级固件。v79 Legacy 驱动路线正确，不改代码。探测脚本存于工作区根 scpi_probe*.py。
 - **2026-11-04 凌晨（v80）**：四项调整。① **CP 改名 CW**：恒功率档全链路（前端按钮/MODE_META/maxFor 映射、后端 load_set 校验、_check_load_range、IT8510Legacy._MODE_CODE/_LEVEL_*、SimLoad、死代码 IT8511A SCPI 类）统一叫 CW（IT8500+ 面板官方叫法 Constant Wattage），帧协议命令码不变（CW=0x02、电平 0x2E/0x2F）。② **负载改设定先关输入**：load_set 在 state.on 为真时先 set_input(False) 并保持 OFF（与电源 v54 行为对齐），日志+toast 提示手动重开；模式切换与数值修改两条前端路径都覆盖。③ **IT8511A+ 波特率只留 9600**：LOAD_MODEL_SPECS.baud_rates=[9600]（真机实测其他速率无响应），前端 fillBaudSelect 自动跟随。④ **全精度显示**：后端删除所有测量/设定值 round（poll_once、_read_power_setpoints、power_set、load_set、sweep 两处），前端 fmtV/fmtI/fmtP 统一走 fmtFull（10 位有效数字去尾零），卡片实测值/状态标签/曲线游标/数据表/组合摘要全部生效；轴刻度 niceStep 系统不变。index.html v=80。模拟模式冒烟：CW 设定、ON 时改 level 自动 OFF、CP 拒绝，全部通过；截图 tools/shot_v80_load.png 验收。
 
+- **2026-11-04 凌晨（v81）**：应用户反馈回退 v80 第④项的前端部分——显示格式恢复为**固定 6 位小数补零**（fmtV/fmtI/fmtP 恢复 toFixed(6)，删 fmtFull；卡片实测 3 位、数据表 6 位、摘要行 2/3 位，全同 v79 样式）。保留：CW 命名、改设定自动关输入、IT8511A+ 波特率仅 9600、**后端数据不 round（全精度落库/CSV）**——只动显示层。index.html v=81。已提交 338c48c 推送。教训：用户对"显示 0 而非 0.000"很敏感，全精度≠去补零，显示格式变更必须先问。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
