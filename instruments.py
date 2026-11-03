@@ -187,8 +187,8 @@ class IT8511A:
     MAX_V = 150.0
     MAX_I = 30.0
     MAX_P = 150.0
-    MODES = {"CURR": "CC", "VOLT": "CV", "RES": "CR", "POW": "CP"}
-    SET_CMD = {"CC": "CURR", "CV": "VOLT", "CR": "RES", "CP": "POW"}
+    MODES = {"CURR": "CC", "VOLT": "CV", "RES": "CR", "POW": "CW"}
+    SET_CMD = {"CC": "CURR", "CV": "VOLT", "CR": "RES", "CW": "POW"}
 
     def __init__(self, transport: SerialTransport):
         self.t = transport
@@ -243,11 +243,13 @@ class IT8510Legacy:
     MAX_I = 20.0
     MAX_P = 120.0
 
-    _MODE_CODE = {"CC": 0, "CV": 1, "CP": 2, "CR": 3}
-    _MODE_NAME = {0: "CC", 1: "CV", 2: "CP", 3: "CR"}
-    _LEVEL_SET = {"CC": 0x2A, "CV": 0x2C, "CP": 0x2E, "CR": 0x30}
-    _LEVEL_GET = {"CC": 0x2B, "CV": 0x2D, "CP": 0x2F, "CR": 0x31}
-    _LEVEL_SCALE = {"CC": 10000.0, "CV": 1000.0, "CP": 1000.0, "CR": 1000.0}
+    # 模式名沿用 IT8500+ 面板叫法: CW = 恒功率 (Constant Wattage, 老手册写作 CP);
+    # 帧协议命令码不变 (CW 档 = 0x02, 电平命令 0x2E/0x2F)。
+    _MODE_CODE = {"CC": 0, "CV": 1, "CW": 2, "CR": 3}
+    _MODE_NAME = {0: "CC", 1: "CV", 2: "CW", 3: "CR"}
+    _LEVEL_SET = {"CC": 0x2A, "CV": 0x2C, "CW": 0x2E, "CR": 0x30}
+    _LEVEL_GET = {"CC": 0x2B, "CV": 0x2D, "CW": 0x2F, "CR": 0x31}
+    _LEVEL_SCALE = {"CC": 10000.0, "CV": 1000.0, "CW": 1000.0, "CR": 1000.0}
 
     _STATUS = {0x80: "OK", 0x90: "校验和错误", 0xA0: "参数超出仪器范围",
                0xB0: "命令无法执行", 0xC0: "非法命令"}
@@ -400,11 +402,12 @@ class IT8511APlusLegacy(IT8510Legacy):
 # 型号注册表: 前端"添加仪器"对话框与后端量程校验共用
 # baud_rates: 该型号串口实际支持的波特率 (前端下拉据此渲染; 官方手册依据)
 #   IT8510 老款: 仅 4800 (2026-11-02 真机实测其他速率无响应)
-#   IT8511A+: 4800/9600/19200/38400, 默认 9600 (2026-11-03 真机实测 4800 无响应)
+#   IT8511A+: 仅 9600 (2026-11-03 真机实测 4800/19200/38400 均无响应; SCPI
+#             探测同样全波特率无响应, 该机串口仅支持帧协议)
 #   IT6302: 4800/9600/38400 (用户手册 BAUD 菜单)
 LOAD_MODEL_SPECS = {
     "IT8511A+": {"max_v": 150.0, "max_i": 30.0, "max_p": 150.0, "max_r": 7500.0,
-                 "baud_rates": [4800, 9600, 19200, 38400], "baud_default": 9600},
+                 "baud_rates": [9600], "baud_default": 9600},
     "IT8510": {"max_v": 120.0, "max_i": 20.0, "max_p": 120.0, "max_r": 4000.0,
                "baud_rates": [4800], "baud_default": 4800},
 }
@@ -517,7 +520,7 @@ class SimLoad:
             i = 30.0 if v < self.level else 0.0
         elif self.mode == "CR":
             i = v / max(self.level, 0.01)
-        else:  # CP
+        else:  # CW 恒功率
             i = self.level / max(v, 0.1)
         # 功率与电流上限
         i = min(i, self.MAX_I, self.MAX_P / max(v, 0.1))

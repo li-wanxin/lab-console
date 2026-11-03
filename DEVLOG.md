@@ -112,7 +112,11 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-03 晚（v79）**：**IT8511A+ 真机接入**（用户配了兼容 IT-E122 模块）。重要认知：IT8511A+ 后面板 DB9 是 **TTL 电平**口（官方 CAUTION：直插标准 RS-232 线可能损坏仪器），必须经 IT-E121/E122 通信模块连电脑；协议与 IT8510 老款同族（IT8500 26 字节帧），但**默认 9600bps**（IT8510 是 4800——这就是之前按型号连不上的根因，地址遍历 0~31 x 波特率扫描定位）。程序改动：新增 IT8511APlusLegacy(IT8510Legacy 子类，model/量程 150V/30A/150W 覆盖)，LOAD_DRIVERS[IT8511A+] 从 SCPI 类改指向 Legacy 子类（TTL 口不讲 SCPI）。真机验证：9600 连接成功，IDN=ITECH,IT8511A,SN:4747410185,FW:01.46。另：gh CLI 已设备码授权（走代理 127.0.0.1:7890），后续 Release 直接可用。
 
-## 六、当前状态（v79）
+
+- **2026-11-03 深夜：IT8511A+ SCPI 实机验证（应雪验证，结论：不支持）**。用户提供《IT8500plus Programming Guide-CN - SCPI.pdf》要求再试 SCPI。实测（COM8=CH343 IT-E122，负载 TTL 单线半双工，RX 有 TX 回环，响应偶发 ~2/6）：\*IDN? 在 9600/4800/19200/38400 x {\n,\r,\r\n} x 多轮重试全部无响应；同链路帧协议 0x20 0x5F 读版本帧有响应（AA 00 12 90 00 01 5F 2A 0D，响应 cmd=0x12）。SYST:REM 前置也无效。手册无协议切换菜单说明；EEVblog 同机型用户证实 TTL 口只有私有帧协议。结论：该机（FW 01.46）串口仅支持 IT8500 帧协议，SCPI 手册适用于带原生 USB/RS232 的新机型（IT8513B+/IT8514+/IT8516C+ 等）或需升级固件。v79 Legacy 驱动路线正确，不改代码。探测脚本存于工作区根 scpi_probe*.py。
+- **2026-11-04 凌晨（v80）**：四项调整。① **CP 改名 CW**：恒功率档全链路（前端按钮/MODE_META/maxFor 映射、后端 load_set 校验、_check_load_range、IT8510Legacy._MODE_CODE/_LEVEL_*、SimLoad、死代码 IT8511A SCPI 类）统一叫 CW（IT8500+ 面板官方叫法 Constant Wattage），帧协议命令码不变（CW=0x02、电平 0x2E/0x2F）。② **负载改设定先关输入**：load_set 在 state.on 为真时先 set_input(False) 并保持 OFF（与电源 v54 行为对齐），日志+toast 提示手动重开；模式切换与数值修改两条前端路径都覆盖。③ **IT8511A+ 波特率只留 9600**：LOAD_MODEL_SPECS.baud_rates=[9600]（真机实测其他速率无响应），前端 fillBaudSelect 自动跟随。④ **全精度显示**：后端删除所有测量/设定值 round（poll_once、_read_power_setpoints、power_set、load_set、sweep 两处），前端 fmtV/fmtI/fmtP 统一走 fmtFull（10 位有效数字去尾零），卡片实测值/状态标签/曲线游标/数据表/组合摘要全部生效；轴刻度 niceStep 系统不变。index.html v=80。模拟模式冒烟：CW 设定、ON 时改 level 自动 OFF、CP 拒绝，全部通过；截图 tools/shot_v80_load.png 验收。
+
+## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
 - 另有一份工作副本 `C:/Users/liwanxin/WorkBuddy/2026-10-28-22-40-24/itech-bench`（WorkBuddy 工作区，已同步 v64 修复；D:/easyCode 不在本机，两处改动需经 GitHub 同步）。

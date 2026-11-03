@@ -310,8 +310,8 @@ class Bench:
         for ch in (1, 2, 3):
             try:
                 v, i = dev.driver.query_setpoints(ch)
-                dev.channels[ch]["vset"] = round(v, 3)
-                dev.channels[ch]["iset"] = round(i, 3)
+                dev.channels[ch]["vset"] = v
+                dev.channels[ch]["iset"] = i
             except Exception:  # noqa: BLE001
                 pass
 
@@ -327,12 +327,12 @@ class Bench:
                 if volts < 0 or volts > vmax:
                     raise InstrumentError(f"CH{ch} 电压超出范围 0~{vmax}V")
                 dev.driver.set_voltage(ch, volts)
-                st["vset"] = round(volts, 3)
+                st["vset"] = volts
             if amps is not None:
                 if amps <= 0 or amps > dev.driver.MAX_I:
                     raise InstrumentError(f"CH{ch} 电流上限超出范围 0~{dev.driver.MAX_I}A")
                 dev.driver.set_current(ch, amps)
-                st["iset"] = round(amps, 3)
+                st["iset"] = amps
             return self.snapshot()
 
     def power_output(self, dev_id: str, ch: int | None, on: bool) -> dict:
@@ -355,13 +355,20 @@ class Bench:
             if dev.role != "load" or dev.driver is None:
                 raise InstrumentError("负载未连接")
             mode = mode.upper()
-            if mode not in ("CC", "CV", "CR", "CP"):
+            if mode not in ("CC", "CV", "CR", "CW"):
                 raise InstrumentError(f"非法模式: {mode}")
             self._check_load_range(dev, mode, value)
+            # 与电源 v54 行为一致: 输入接通时改模式/改设定, 必须先关输入,
+            # 改完保持 OFF, 由用户手动再开 (避免带载切档冲击)
+            was_on = bool(dev.state.get("on"))
+            if was_on:
+                dev.driver.set_input(False)
+                dev.state["on"] = False
+                self.log("warn", f"{dev.name} 改设定前已自动关闭输入, 请手动重新开启")
             dev.driver.set_mode(mode)
             dev.driver.set_level(mode, value)
             dev.state["mode"] = mode
-            dev.state["level"] = round(value, 4)
+            dev.state["level"] = value
             return self.snapshot()
 
     def load_input(self, dev_id: str, on: bool) -> dict:
@@ -381,8 +388,8 @@ class Bench:
             raise InstrumentError(f"CC 电流需在 0~{r['max_i']:g}A")
         if mode == "CV" and not (0 < value <= r["max_v"]):
             raise InstrumentError(f"CV 电压需在 0~{r['max_v']:g}V")
-        if mode == "CP" and not (0 < value <= r["max_p"]):
-            raise InstrumentError(f"CP 功率需在 0~{r['max_p']:g}W")
+        if mode == "CW" and not (0 < value <= r["max_p"]):
+            raise InstrumentError(f"CW 功率需在 0~{r['max_p']:g}W")
         if mode == "CR" and not (0.01 <= value <= r["max_r"]):
             raise InstrumentError(f"CR 电阻需在 0.01~{r['max_r']:g}Ω")
 
@@ -465,17 +472,17 @@ class Bench:
                         try:
                             v, i = dev.driver.measure(ch)
                             st = dev.channels[ch]
-                            # 保留仪器回读精度（6 位有效）：小电流 mW 级功率不丢位
-                            st["v"] = round(v, 6)
-                            st["i"] = round(i, 6)
-                            st["p"] = round(v * i, 6)
+                            # 全精度: 不做 round 截断, 保留仪器回读原始值
+                            st["v"] = v
+                            st["i"] = i
+                            st["p"] = v * i
                             dev.meta["error"] = ""
                         except Exception as exc:  # noqa: BLE001
                             dev.meta["error"] = str(exc)
                 else:
                     try:
                         v, i, p = dev.driver.measure()
-                        dev.state.update({"v": round(v, 6), "i": round(i, 6), "p": round(p, 6)})
+                        dev.state.update({"v": v, "i": i, "p": p})
                         dev.meta["error"] = ""
                     except Exception as exc:  # noqa: BLE001
                         dev.meta["error"] = str(exc)
@@ -639,7 +646,7 @@ class Bench:
             target = max(0.0, min(i_start + k * step, r["max_i"]))
             with self.lock:
                 ldev.driver.set_level("CC", target)
-                ldev.state["level"] = round(target, 4)
+                ldev.state["level"] = target
 
             time.sleep(dwell)
 
@@ -648,16 +655,16 @@ class Bench:
             with self.lock:
                 pv, pi = pdev.driver.measure(ch)
                 lv, li, lp = ldev.driver.measure()
-                pdev.channels[ch].update({"v": round(pv, 4), "i": round(pi, 4), "p": round(pv * pi, 3)})
-                ldev.state.update({"v": round(lv, 4), "i": round(li, 4), "p": round(lp, 3)})
+                pdev.channels[ch].update({"v": pv, "i": pi, "p": pv * pi})
+                ldev.state.update({"v": lv, "i": li, "p": lp})
                 self.sweep["points"].append(
                     {
-                        "set": round(target, 4),
-                        "v": round(lv, 4),
-                        "i": round(li, 4),
-                        "p": round(lp, 3),
-                        "vpsu": round(pv, 4),
-                        "ipsu": round(pi, 4),
+                        "set": target,
+                        "v": lv,
+                        "i": li,
+                        "p": lp,
+                        "vpsu": pv,
+                        "ipsu": pi,
                     }
                 )
                 self.sweep["progress"] = k + 1
@@ -715,16 +722,16 @@ class Bench:
             with self.lock:
                 pv, pi = pdev.driver.measure(ch)
                 lv, li, lp = ldev.driver.measure()
-                pdev.channels[ch].update({"v": round(pv, 4), "i": round(pi, 4), "p": round(pv * pi, 3)})
-                ldev.state.update({"v": round(lv, 4), "i": round(li, 4), "p": round(lp, 3)})
+                pdev.channels[ch].update({"v": pv, "i": pi, "p": pv * pi})
+                ldev.state.update({"v": lv, "i": li, "p": lp})
                 self.sweep["points"].append(
                     {
-                        "set": round(target, 4),
-                        "v": round(lv, 4),
-                        "i": round(li, 4),
-                        "p": round(lp, 3),
-                        "vpsu": round(pv, 4),
-                        "ipsu": round(pi, 4),
+                        "set": target,
+                        "v": lv,
+                        "i": li,
+                        "p": lp,
+                        "vpsu": pv,
+                        "ipsu": pi,
                     }
                 )
                 self.sweep["progress"] = k + 1

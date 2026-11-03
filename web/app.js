@@ -7,7 +7,7 @@ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
 const S = {
   view: null,                    // 设备 id 或 'sweep'
-  loadMode: {},                  // devId -> CC/CV/CR/CP
+  loadMode: {},                  // devId -> CC/CV/CR/CW
   combo: {},
   comboLive: {},                 // devId -> 正按组合方式接通的组合键('s12'…)或 null；与视图切换无关
   ports: [],
@@ -33,7 +33,7 @@ const MODE_META = {
   CC: { label: '负载电流', unit: 'A', min: 0.001, max: 30, step: 0.01, def: 0.5 },
   CV: { label: '负载电压', unit: 'V', min: 0.001, max: 150, step: 0.1, def: 5 },
   CR: { label: '负载电阻', unit: 'Ω', min: 0.01, max: 7500, step: 0.01, def: 100 },
-  CP: { label: '负载功率', unit: 'W', min: 0.001, max: 150, step: 0.1, def: 10 },
+  CW: { label: '负载功率', unit: 'W', min: 0.001, max: 150, step: 0.1, def: 10 },
 };
 
 /* 电源通道联合输出组合（接线按仪器手册手动完成，软件负责联动与组合读数） */
@@ -143,7 +143,7 @@ function wireWarnHtml(mode, devId) {
   const items = COMBO[mode].chs.map(c => {
     const ch = st && st.channels[c];
     const on = !!(ch && ch.on);
-    const state = on ? `输出中 ${Number(ch.v).toFixed(2)}V / ${Number(ch.i).toFixed(3)}A` : '未输出';
+    const state = on ? `输出中 ${fmtV(ch.v)}V / ${fmtI(ch.i)}A` : '未输出';
     return `<span class="wire-warn-item">CH${c}（${state}）${
       on ? `<button class="wire-off-btn" data-wire-off="${c}" title="关闭 CH${c} 输出">关闭</button>` : ''
     }</span>`;
@@ -734,7 +734,7 @@ function devEntryHtml(d) {
     tip = `${ch} 通道直流电源 · CH1/CH2 30V/3A · CH3 5V/3A`;
   } else if (d.range) {
     spec = `${d.range.max_v}V ${d.range.max_i}A ${d.range.max_p}W`;
-    tip = `直流电子负载 · 量程 ${d.range.max_v}V / ${d.range.max_i}A / ${d.range.max_p}W · CC/CV/CR/CP`;
+    tip = `直流电子负载 · 量程 ${d.range.max_v}V / ${d.range.max_i}A / ${d.range.max_p}W · CC/CV/CR/CW`;
   } else {
     spec = ''; tip = '';
   }
@@ -1025,7 +1025,7 @@ function loadPanelHtml(d) {
               <button type="button" data-mode="CC" class="sel">CC</button>
               <button type="button" data-mode="CV">CV</button>
               <button type="button" data-mode="CR">CR</button>
-              <button type="button" data-mode="CP">CP</button>
+              <button type="button" data-mode="CW" title="恒功率 Constant Wattage">CW</button>
             </div>
             <label class="field" style="margin:0">
               <span class="value-label">负载电流</span>
@@ -1163,7 +1163,7 @@ function renderPowerPanel(st, d) {
     if (!m) { ci.textContent = ''; }
     else {
       const [v, i] = cardPoint(d, logicalOutputs(d.id)[0]);
-      ci.textContent = `${m.label} · ${Number(v).toFixed(2)}V / ${Number(i).toFixed(3)}A`;
+      ci.textContent = `${m.label} · ${fmtV(v)}V / ${fmtI(i)}A`;
     }
   }
 
@@ -1184,17 +1184,17 @@ function renderLoadPanel(st, d) {
 
   const mode = S.loadMode[d.id] || 'CC';
   const meta = MODE_META[mode];
-  const maxFor = { CC: r.max_i, CV: r.max_v, CR: r.max_r, CP: r.max_p }[mode];
+  const maxFor = { CC: r.max_i, CV: r.max_v, CR: r.max_r, CW: r.max_p }[mode];
   const valInp = $('.load-value', sec);
   valInp.max = maxFor;
 
-  $('.rv', sec).textContent = Number(d.v).toFixed(3);
-  $('.ri', sec).textContent = Number(d.i).toFixed(3);
-  $('.rp', sec).textContent = Number(d.p).toFixed(3);
+  $('.rv', sec).textContent = fmtV(d.v);
+  $('.ri', sec).textContent = fmtI(d.i);
+  $('.rp', sec).textContent = fmtP(d.p);
 
   const card = $('.load-ch', sec);
   card.classList.toggle('active', !!d.on);
-  $('.state-tag', sec).textContent = d.connected ? `${d.mode} · ${Number(d.level).toFixed(3)} ${meta.unit}` : '—';
+  $('.state-tag', sec).textContent = d.connected ? `${d.mode} · ${fmtFull(d.level)} ${meta.unit}` : '—';
 
   const inp = $('[data-load-input]', sec);
   if (!inp.matches(':focus')) inp.checked = !!d.on;
@@ -1216,7 +1216,7 @@ function syncLoadPanelMode(sec, d, send) {
   const mode = S.loadMode[d.id] || 'CC';
   const meta = MODE_META[mode];
   const r = d.range || { max_v: 150, max_i: 30, max_p: 150, max_r: 7500 };
-  const maxFor = { CC: r.max_i, CV: r.max_v, CR: r.max_r, CP: r.max_p }[mode];
+  const maxFor = { CC: r.max_i, CV: r.max_v, CR: r.max_r, CW: r.max_p }[mode];
   $('.value-label', sec).textContent = meta.label;
   $('.unit-tag', sec).textContent = meta.unit;
   const inp = $('.load-value', sec);
@@ -1228,7 +1228,10 @@ function syncLoadPanelMode(sec, d, send) {
   let v = parseFloat(inp.value);
   if (!isFinite(v) || v < meta.min || v > maxFor) { v = meta.def; inp.value = v; }
   if (send) {
-    api('/api/load/set', { dev: d.id, mode, value: v }).catch(e => toast(e.message, true));
+    const wasOn = !!d.on;
+    api('/api/load/set', { dev: d.id, mode, value: v })
+      .then(() => { if (wasOn) toast('输入已自动关闭（改设定需先关输出），请手动重新开启', true); })
+      .catch(e => toast(e.message, true));
   }
 }
 
@@ -1259,25 +1262,25 @@ function fmtClock(t) {
   return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
 
-/* 电压/电流/功率显示：统一固定 6 位小数补零——所有通道、卡片、游标、
-   数据表、总功率位数完全一致（精度不损失，与 CSV 导出一致） */
-function fmtV(x) {
+/* 电压/电流/功率显示: 全精度——保留仪器返回的全部有效数字, 不固定小数位。
+   用 10 位有效数字截断(仪器分辨率最高 0.1mA, 远够), 再去尾零:
+   0.003348 → "0.003348", 12.5 → "12.5", 避免浮点长尾又不丢位。
+   卡片、曲线游标、数据表、总功率全部走这里, 位数一致 */
+function fmtFull(x) {
   if (x == null || !isFinite(x)) return '—';
-  return Number(x).toFixed(6);
+  let s = Number(x).toPrecision(10);
+  if (s.includes('e')) return s;
+  s = s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  return s === '-0' ? '0' : s;
 }
-function fmtI(x) {
-  if (x == null || !isFinite(x)) return '—';
-  return Number(x).toFixed(6);
-}
-function fmtP(x) {
-  if (x == null || !isFinite(x)) return '—';
-  return Number(x).toFixed(6);
-}
+function fmtV(x) { return fmtFull(x); }
+function fmtI(x) { return fmtFull(x); }
+function fmtP(x) { return fmtFull(x); }
 
 function rowsHtml(rows, get, t0) {
   if (!rows.length) return '<tr><td colspan="4" class="td-empty">—</td></tr>';
-  // 固定 6 位小数补零，列内位数一致；CSS 左对齐
-  const f = x => (x == null ? '—' : Number(x).toFixed(6));
+  // 全精度显示（fmtFull），CSS 左对齐
+  const f = x => (x == null ? '—' : fmtFull(x));
   return rows.map(h => {
     const a = get ? get(h) : null;
     return '<tr><td>' + fmtClock(h.t) + '</td>'
@@ -2107,7 +2110,7 @@ function bind() {
             await api('/api/power/set', body);
           }
           toast(`${card.querySelector('.ch-name').textContent} 已设定 `
-            + `${isFinite(v) ? v.toFixed(2) + 'V' : '—'} / ${isFinite(i) ? i.toFixed(3) + 'A' : '—'}${offMsg}`);
+            + `${isFinite(v) ? fmtV(v) + 'V' : '—'} / ${isFinite(i) ? fmtI(i) + 'A' : '—'}${offMsg}`);
         } catch (e) { toast(e.message, true); }
         return;
       }
@@ -2128,7 +2131,12 @@ function bind() {
       const v = parseFloat(t.value);
       if (!isFinite(v)) return toast('请输入有效数值', true);
       const mode = S.loadMode[dev.id] || 'CC';
-      try { await api('/api/load/set', { dev: dev.id, mode, value: v }); toast(`${dev.name} ${mode} = ${v}`); }
+      const wasOn = !!dev.on;
+      try {
+        await api('/api/load/set', { dev: dev.id, mode, value: v });
+        toast(`${dev.name} ${mode} = ${v}`);
+        if (wasOn) toast('输入已自动关闭（改设定需先关输出），请手动重新开启', true);
+      }
       catch (e) { toast(e.message, true); }
       return;
     }
