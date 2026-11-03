@@ -108,7 +108,9 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-03（v0.0.1 发布）**：首个 GitHub Release。新增 Inno Setup 脚本 setup.iss（AppVersion 0.0.1，安装 LabConsole.exe 到 Program Files，开始菜单/桌面快捷方式/卸载，随装 README/DEVLOG），编译 Output/LabConsole-Setup-v0.0.1.exe（15MB）。Release: https://github.com/li-wanxin/lab-console/releases/tag/v0.0.1 附件 LabConsole-Setup-v0.0.1.exe（安装包）+ LabConsole-Portable-v0.0.1.exe（便携=原 ITECH测试台.exe）。工具链：winget 装 Inno Setup 6（本机 %LOCALAPPDATA%\Programs）与 gh CLI；gh 走系统代理 127.0.0.1:7890（GitHub HTTPS 直连被墙，SSH 22 直连可用）；gh auth login --web 设备码授权登录 li-wanxin。中文文件名附件 gh 上传会改名，用英文副本名上传。
 
-## 六、当前状态（v0.0.1 已发布）
+- **2026-11-03 晚（v79）**：**IT8511A+ 真机接入**（用户配了兼容 IT-E122 模块）。重要认知：IT8511A+ 后面板 DB9 是 **TTL 电平**口（官方 CAUTION：直插标准 RS-232 线可能损坏仪器），必须经 IT-E121/E122 通信模块连电脑；协议与 IT8510 老款同族（IT8500 26 字节帧），但**默认 9600bps**（IT8510 是 4800——这就是之前按型号连不上的根因，地址遍历 0~31 x 波特率扫描定位）。程序改动：新增 IT8511APlusLegacy(IT8510Legacy 子类，model/量程 150V/30A/150W 覆盖)，LOAD_DRIVERS[IT8511A+] 从 SCPI 类改指向 Legacy 子类（TTL 口不讲 SCPI）。真机验证：9600 连接成功，IDN=ITECH,IT8511A,SN:4747410185,FW:01.46。另：gh CLI 已设备码授权（走代理 127.0.0.1:7890），后续 Release 直接可用。
+
+## 六、当前状态（v79）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
 - 另有一份工作副本 `C:/Users/liwanxin/WorkBuddy/2026-10-28-22-40-24/itech-bench`（WorkBuddy 工作区，已同步 v64 修复；D:/easyCode 不在本机，两处改动需经 GitHub 同步）。
