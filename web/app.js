@@ -143,7 +143,7 @@ function wireWarnHtml(mode, devId) {
   const items = COMBO[mode].chs.map(c => {
     const ch = st && st.channels[c];
     const on = !!(ch && ch.on);
-    const state = on ? `输出中 ${fmtV(ch.v)}V / ${fmtI(ch.i)}A` : '未输出';
+    const state = on ? `输出中 ${Number(ch.v).toFixed(2)}V / ${Number(ch.i).toFixed(3)}A` : '未输出';
     return `<span class="wire-warn-item">CH${c}（${state}）${
       on ? `<button class="wire-off-btn" data-wire-off="${c}" title="关闭 CH${c} 输出">关闭</button>` : ''
     }</span>`;
@@ -1163,7 +1163,7 @@ function renderPowerPanel(st, d) {
     if (!m) { ci.textContent = ''; }
     else {
       const [v, i] = cardPoint(d, logicalOutputs(d.id)[0]);
-      ci.textContent = `${m.label} · ${fmtV(v)}V / ${fmtI(i)}A`;
+      ci.textContent = `${m.label} · ${Number(v).toFixed(2)}V / ${Number(i).toFixed(3)}A`;
     }
   }
 
@@ -1188,13 +1188,13 @@ function renderLoadPanel(st, d) {
   const valInp = $('.load-value', sec);
   valInp.max = maxFor;
 
-  $('.rv', sec).textContent = fmtV(d.v);
-  $('.ri', sec).textContent = fmtI(d.i);
-  $('.rp', sec).textContent = fmtP(d.p);
+  $('.rv', sec).textContent = Number(d.v).toFixed(3);
+  $('.ri', sec).textContent = Number(d.i).toFixed(3);
+  $('.rp', sec).textContent = Number(d.p).toFixed(3);
 
   const card = $('.load-ch', sec);
   card.classList.toggle('active', !!d.on);
-  $('.state-tag', sec).textContent = d.connected ? `${d.mode} · ${fmtFull(d.level)} ${meta.unit}` : '—';
+  $('.state-tag', sec).textContent = d.connected ? `${d.mode} · ${Number(d.level).toFixed(3)} ${meta.unit}` : '—';
 
   const inp = $('[data-load-input]', sec);
   if (!inp.matches(':focus')) inp.checked = !!d.on;
@@ -1262,25 +1262,25 @@ function fmtClock(t) {
   return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
 
-/* 电压/电流/功率显示: 全精度——保留仪器返回的全部有效数字, 不固定小数位。
-   用 10 位有效数字截断(仪器分辨率最高 0.1mA, 远够), 再去尾零:
-   0.003348 → "0.003348", 12.5 → "12.5", 避免浮点长尾又不丢位。
-   卡片、曲线游标、数据表、总功率全部走这里, 位数一致 */
-function fmtFull(x) {
+/* 电压/电流/功率显示：统一固定 6 位小数补零——所有通道、卡片、游标、
+   数据表、总功率位数完全一致（后端数据不截断，显示格式统一 6 位） */
+function fmtV(x) {
   if (x == null || !isFinite(x)) return '—';
-  let s = Number(x).toPrecision(10);
-  if (s.includes('e')) return s;
-  s = s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
-  return s === '-0' ? '0' : s;
+  return Number(x).toFixed(6);
 }
-function fmtV(x) { return fmtFull(x); }
-function fmtI(x) { return fmtFull(x); }
-function fmtP(x) { return fmtFull(x); }
+function fmtI(x) {
+  if (x == null || !isFinite(x)) return '—';
+  return Number(x).toFixed(6);
+}
+function fmtP(x) {
+  if (x == null || !isFinite(x)) return '—';
+  return Number(x).toFixed(6);
+}
 
 function rowsHtml(rows, get, t0) {
   if (!rows.length) return '<tr><td colspan="4" class="td-empty">—</td></tr>';
-  // 全精度显示（fmtFull），CSS 左对齐
-  const f = x => (x == null ? '—' : fmtFull(x));
+  // 固定 6 位小数补零，列内位数一致；CSS 左对齐
+  const f = x => (x == null ? '—' : Number(x).toFixed(6));
   return rows.map(h => {
     const a = get ? get(h) : null;
     return '<tr><td>' + fmtClock(h.t) + '</td>'
@@ -2110,7 +2110,7 @@ function bind() {
             await api('/api/power/set', body);
           }
           toast(`${card.querySelector('.ch-name').textContent} 已设定 `
-            + `${isFinite(v) ? fmtV(v) + 'V' : '—'} / ${isFinite(i) ? fmtI(i) + 'A' : '—'}${offMsg}`);
+            + `${isFinite(v) ? v.toFixed(2) + 'V' : '—'} / ${isFinite(i) ? i.toFixed(3) + 'A' : '—'}${offMsg}`);
         } catch (e) { toast(e.message, true); }
         return;
       }
