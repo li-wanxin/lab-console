@@ -23,9 +23,19 @@ import time
 import traceback
 import webbrowser
 from collections import deque
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
+
+try:
+    import openpyxl
+    from openpyxl.chart import LineChart, Reference
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    HAS_XLSX = True
+except ImportError:                                    # 未装 openpyxl 时记录功能降级提示
+    HAS_XLSX = False
 
 from instruments import (
     HAS_SERIAL,
@@ -135,6 +145,7 @@ class Bench:
         self.history: deque = deque(maxlen=HISTORY_POINTS)
         self.alerts: deque = deque(maxlen=60)
         self.recordings: dict = {}                   # id -> {id, dev, role, ...}
+        self.pending_exports: dict = {}              # 已结束待导出: id -> rec
         self._rec_seq = 0
         self.sweep = {
             "running": False,
@@ -797,16 +808,17 @@ class Bench:
                 chans = sorted({c for o in rec_outs for c in o["chs"]})
             path = str(path or "").strip()
             if not path:
-                path = f"{dev.name.replace(' ', '')}记录_{time.strftime('%Y%m%d_%H%M%S')}.csv"
-            if not path.lower().endswith(".csv"):
-                path += ".csv"
+                path = f"{dev.name.replace(' ', '')}记录_{time.strftime('%Y%m%d_%H%M%S')}.xlsm"
+            # 统一导出为 Excel 工作簿 (.xlsm)；填了其他后缀一律改写
+            if not path.lower().endswith(".xlsm"):
+                path = str(Path(path).with_suffix(".xlsm"))
             target = Path(path)
             try:
                 if str(target.parent) not in ("", "."):
                     target.parent.mkdir(parents=True, exist_ok=True)
             except Exception as exc:  # noqa: BLE001
                 raise InstrumentError(f"存储目录不可用: {exc}")
-            for r in self.recordings.values():
+            for r in list(self.recordings.values()) + list(self.pending_exports.values()):
                 if Path(r["path"]) == Path(path):
                     raise InstrumentError(f"该文件已被记录 #{r['id']} 使用，请换个文件名")
             self._rec_seq += 1
@@ -819,7 +831,10 @@ class Bench:
             t0 = time.time()
             rec = {"id": self._rec_seq, "dev": dev.id, "role": role, "channels": chans,
                    "outputs": rec_outs, "t0": t0, "path": path, "rows": [],
-                   "interval": iv, "next_t": t0 + iv}
+                   "interval": iv, "next_t": t0 + iv,
+                   # 导出概览用: 开始时固化仪器信息
+                   "dev_name": dev.name, "dev_model": dev.model,
+                   "dev_idn": (dev.meta or {}).get("idn", "")}
             self.recordings[rec["id"]] = rec
             what = " + ".join(o["label"] for o in rec_outs) if role == "power" else dev.name
             self.log("info", f"开始记录 #{rec['id']} · {dev.name} · {what} · {iv:g}s/点 → {path}")
@@ -827,17 +842,49 @@ class Bench:
                     "channels": chans, "recordings": self._rec_list()}
 
     def record_stop(self, rid: int) -> dict:
+        """结束记录: 停止采样并挂起等待导出（前端弹导出选项对话框）。"""
         with self.lock:
             rec = self.recordings.pop(int(rid), None)
             if rec is None:
                 raise InstrumentError("记录不存在或已结束")
+            rec["t1"] = time.time()
+            self.pending_exports[int(rec["id"])] = rec
+        self.log("info", f"记录 #{rec['id']} 已结束 ({len(rec['rows'])} 点), 等待导出 → {rec['path']}")
+        return {"stopped": True, "id": rec["id"], "path": rec["path"],
+                "count": len(rec["rows"]), "dev": rec["dev"]}
+
+    def record_discard(self, rid: int) -> dict:
+        """丢弃一条已结束未导出的记录。"""
+        with self.lock:
+            rec = self.pending_exports.pop(int(rid), None)
+            if rec is None:
+                raise InstrumentError("没有这条待导出记录")
+        self.log("info", f"记录 #{rec['id']} 已丢弃 ({len(rec['rows'])} 点未导出)")
+        return {"ok": True}
+
+    def record_export(self, rid: int, overview: bool = True, chart: bool = True) -> dict:
+        """导出已结束的记录为 .xlsm; 可选概览页(第一页)与曲线图页(最后一页)。"""
+        if not HAS_XLSX:
+            raise InstrumentError("未安装 openpyxl, 无法导出 Excel; 请 pip install openpyxl")
+        with self.lock:
+            rec = self.pending_exports.get(int(rid))
+            if rec is None:
+                raise InstrumentError("没有这条待导出记录")
             rows = list(rec["rows"])
+            path = rec["path"]
+            overview = bool(overview)
+            chart = bool(chart)
         try:
-            self._write_recording(rec, rows)
+            self._write_recording_xlsm(rec, rows, overview, chart)
         except Exception as exc:  # noqa: BLE001
-            raise InstrumentError(f"写出 CSV 失败: {exc}")
-        self.log("ok", f"记录 #{rec['id']} 已导出 {len(rows)} 点 → {rec['path']}")
-        return {"ok": True, "path": rec["path"], "count": len(rows)}
+            raise InstrumentError(f"写出 Excel 失败: {exc}")
+        with self.lock:
+            self.pending_exports.pop(int(rid), None)
+        what = "概览 + " if overview else ""
+        what += "曲线图 + " if chart else ""
+        self.log("ok", f"记录 #{rec['id']} 已导出 {len(rows)} 点 ({what.rstrip(' + ')}) → {path}")
+        return {"ok": True, "path": path, "count": len(rows),
+                "overview": overview, "chart": chart}
 
     @staticmethod
     def _combined_point(d: dict, o: dict) -> list:
@@ -858,28 +905,143 @@ class Bench:
         """CSV 时间列：精确到毫秒（记录间隔可小于 1s，秒级会重复）。"""
         return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) + f".{int(t * 1000) % 1000:03d}"
 
-    def _write_recording(self, rec: dict, rows: list) -> None:
-        buf = io.StringIO()
-        w = csv.writer(buf)
+    def _rec_columns(self, rec: dict) -> list:
+        """数据表列定义: [(表头, 取值函数)]。取值函数输入行 h 返回数值或 None。"""
         if rec["role"] == "power":
-            head = ["时间"]
+            cols = [("时间", None)]
             for o in rec["outputs"]:
-                head += [f"{o['label']}_电压_V", f"{o['label']}_电流_A", f"{o['label']}_功率_W"]
-            w.writerow(head)
-            for h in rows:
-                line = [self._csv_time(h["t"])]
-                for o in rec["outputs"]:
-                    line += self._combined_point(h["d"], o)
-                w.writerow(line)
-        else:
-            w.writerow(["时间", "电压_V", "电流_A", "功率_W", "工作模式", "设定值"])
-            for h in rows:
-                mode, level = h["d"].get("lset", ["", ""])
-                w.writerow([
-                    self._csv_time(h["t"]),
-                    *h["d"]["load"], mode, level,
-                ])
-        Path(rec["path"]).write_bytes(buf.getvalue().encode("utf-8-sig"))
+                for suffix, idx in (("电压_V", 0), ("电流_A", 1), ("功率_W", 2)):
+                    cols.append((f"{o['label']}_{suffix}",
+                                 lambda h, _o=o, _i=idx: (self._combined_point(h["d"], _o) or [None]*3)[_i]))
+            return cols
+        cols = [("时间", None), ("电压_V", lambda h: h["d"]["load"][0]),
+                ("电流_A", lambda h: h["d"]["load"][1]), ("功率_W", lambda h: h["d"]["load"][2]),
+                ("工作模式", lambda h: h["d"].get("lset", ["", ""])[0]),
+                ("设定值", lambda h: h["d"].get("lset", ["", ""])[1])]
+        return cols
+
+    @staticmethod
+    def _xlsm_time(t: float) -> datetime:
+        return datetime.fromtimestamp(t)
+
+    def _write_recording_xlsm(self, rec: dict, rows: list, overview: bool, chart: bool) -> None:
+        """导出 .xlsm: [概览(可选)] + 数据 + [曲线图(可选)]。"""
+        cols = self._rec_columns(rec)
+        num_cols = [c for c in cols if c[1] is not None and c[0] != "工作模式"]
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "数据"
+
+        # ---- 数据表 ----
+        ws.append([c[0] for c in cols])
+        for h in rows:
+            line = [self._xlsm_time(h["t"])]
+            for c in cols[1:]:
+                try:
+                    v = c[1](h)
+                except Exception:  # noqa: BLE001
+                    v = None
+                line.append(v)
+            ws.append(line)
+        # 时间列格式: 毫秒精度 (记录间隔可小于 1s)
+        for r in range(2, len(rows) + 2):
+            ws.cell(row=r, column=1).number_format = "yyyy-mm-dd hh:mm:ss.000"
+        ws.column_dimensions["A"].width = 21
+        for i in range(2, len(cols) + 1):
+            ws.column_dimensions[get_column_letter(i)].width = 14
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill("solid", fgColor="DDEBF7")
+        ws.freeze_panes = "A2"
+
+        # ---- 概览 (第一页) ----
+        if overview:
+            ov = wb.create_sheet("概览", 0)
+            t0s = self._csv_time(rec["t0"]) if rows else "—"
+            t1s = self._csv_time(rows[-1]["t"]) if rows else "—"
+            iv = rec.get("interval", POLL_INTERVAL)
+            outs_txt = " + ".join(o["label"] for o in rec["outputs"]) if rec["role"] == "power" \
+                else "电压 / 电流 / 功率 (含工作模式)"
+            info = [
+                ("测试概览", None),
+                ("仪器", f"{rec.get('dev_name', '')}（{rec.get('dev_model', '')}）"),
+                ("仪器标识", rec.get("dev_idn", "") or "—"),
+                ("记录对象", outs_txt),
+                ("开始时间", t0s),
+                ("结束时间", t1s),
+                ("采样点数", len(rows)),
+                ("采样间隔", f"{iv:g} 秒"),
+                ("生成时间", self._csv_time(time.time())),
+            ]
+            for k, v in info:
+                ov.append([k, v])
+            ov["A1"].font = Font(bold=True, size=14)
+            for r in range(2, len(info) + 1):
+                ov.cell(row=r, column=1).font = Font(bold=True)
+            ov.column_dimensions["A"].width = 14
+            ov.column_dimensions["B"].width = 46
+
+            # 统计表
+            stat_row = len(info) + 2
+            ov.cell(row=stat_row, column=1, value="统计").font = Font(bold=True, size=12)
+            head = ["通道", "最小值", "最大值", "平均值"]
+            for j, htxt in enumerate(head, start=1):
+                c = ov.cell(row=stat_row + 1, column=j, value=htxt)
+                c.font = Font(bold=True)
+                c.fill = PatternFill("solid", fgColor="DDEBF7")
+            for i, (title, fn) in enumerate(num_cols):
+                vals = []
+                for h in rows:
+                    try:
+                        v = fn(h)
+                    except Exception:  # noqa: BLE001
+                        v = None
+                    if isinstance(v, (int, float)):
+                        vals.append(float(v))
+                r = stat_row + 2 + i
+                ov.cell(row=r, column=1, value=title)
+                if vals:
+                    ov.cell(row=r, column=2, value=min(vals))
+                    ov.cell(row=r, column=3, value=max(vals))
+                    ov.cell(row=r, column=4, value=sum(vals) / len(vals))
+                else:
+                    ov.cell(row=r, column=2, value="—")
+                    ov.cell(row=r, column=3, value="—")
+                    ov.cell(row=r, column=4, value="—")
+            tip = ov.cell(row=stat_row + 2 + len(num_cols) + 1, column=1,
+                          value="详细数据见「数据」表" + ("；曲线见「曲线图」表。" if chart else "。"))
+            tip.font = Font(italic=True, color="808080")
+            ov.column_dimensions["C"].width = 12
+            ov.column_dimensions["D"].width = 12
+
+        # ---- 曲线图 (最后一页) ----
+        if chart and rows:
+            ch = wb.create_sheet("曲线图")
+            ch.sheet_view.showGridLines = False
+            nch = LineChart()
+            nch.title = "U / I / W 记录曲线"
+            nch.style = 2
+            nch.height = 12
+            nch.width = 26
+            nch.y_axis.title = "数值"
+            nch.x_axis.title = "时间"
+            data = Reference(ws, min_col=2, max_col=len(cols), min_row=1, max_row=len(rows) + 1)
+            cats = Reference(ws, min_col=1, min_row=2, max_row=len(rows) + 1)
+            nch.add_data(data, titles_from_data=True)
+            nch.set_categories(cats)
+            for s in nch.series:
+                s.smooth = False
+                s.graphicalProperties.line.width = 14000  # ≈1.1pt
+            nch.x_axis.tickLblSkip = max(1, len(rows) // 10)
+            nch.x_axis.tickMarkSkip = max(1, len(rows) // 10)
+            ch.add_chart(nch, "B2")
+            note = ch.cell(row=30, column=2,
+                           value="双击图表可在 Excel 中编辑；数据源为「数据」表。")
+            note.font = Font(italic=True, color="808080")
+
+        Path(rec["path"]).parent.mkdir(parents=True, exist_ok=True)
+        wb.save(rec["path"])
 
     # ---------------- 快照 ----------------
     def snapshot(self) -> dict:
@@ -915,6 +1077,11 @@ class Bench:
                 "alerts": list(self.alerts)[:30],
                 "sweep": self.sweep,
                 "recordings": self._rec_list(),
+                "pending": [
+                    {"id": r["id"], "dev": r["dev"], "role": r["role"],
+                     "t0": r["t0"], "path": r["path"], "count": len(r["rows"])}
+                    for r in self.pending_exports.values()
+                ],
                 "ports": list_serial_ports(),
                 "has_serial": HAS_SERIAL,
             }
@@ -1074,6 +1241,11 @@ class Handler(BaseHTTPRequestHandler):
                 )
             if path == "/api/record/stop":
                 return self._json(BENCH.record_stop(body["id"]))
+            if path == "/api/record/export":
+                return self._json(BENCH.record_export(
+                    body["id"], bool(body.get("overview", True)), bool(body.get("chart", True))))
+            if path == "/api/record/discard":
+                return self._json(BENCH.record_discard(body["id"]))
             if path == "/api/fs/mkdir":
                 target = Path(body.get("path", ""))
                 if not str(target).strip():

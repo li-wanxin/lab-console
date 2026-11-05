@@ -120,6 +120,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-04 凌晨（v0.0.2 发布）**：① 顶部标题旁新增**程序版本徽章**——app.py 新增 APP_VERSION="0.0.2" 常量并随 /api/status 下发 app_version 字段，前端 render() 渲染 #app-ver（样式 .app-ver 与徽章一致）。② setup.iss 升 0.0.2（MyAppVersion/VersionInfo*），PyInstaller 重打包 dist/ITECH测试台.exe（13.2MB，内嵌 v82 界面），ISCC 编译 Output/LabConsole-Setup-v0.0.2.exe（15MB）。③ GitHub Release v0.0.2：附件 LabConsole-Setup-v0.0.2.exe + LabConsole-Portable-v0.0.2.exe（便携版英文副本，中文文件名上传会被改名）。界面资源 v82。发布后注意：APP_VERSION 以后每次发版要同步改（与 setup.iss 一致）。
 
+- **2026-11-05 上午（界面 v83，记录导出改版）**：**记录导出从 CSV 改为 Excel (.xlsm) + 导出选项对话框**。流程：结束记录 → 停止采样并挂起（recordings→pending_exports，快照新增 pending 列表）→ 前端弹 #export-mask 对话框勾选「测试概览」「U/I/W 曲线图」（默认都勾）→ POST /api/record/export{id,overview,chart} 生成 xlsm；取消可关窗，rec-bar 留"待导出"条目（导出 Excel/丢弃按钮，/api/record/discard）。xlsm 结构：[概览(可选,第一页)] + 数据 + [曲线图(可选,最后页)]；概览含仪器名/型号/IDN、记录对象、起止时间、点数、间隔、各数值列 min/max/avg；曲线为 openpyxl LineChart（数据源引用数据表，时间类别轴）。数据表时间列为 datetime（格式 yyyy-mm-dd hh:mm:ss.000），record_start 文件名强制 .xlsm，重名检查涵盖 pending。依赖 openpyxl>=3.1（requirements + PyInstaller --collect-all openpyxl，dist exe 已重打包 20.2MB）。验证：模拟端到端（负载单路/电源双输出）、无概览分支、读回 sheet 顺序与统计、对话框截图。IV 扫描导出仍为 CSV（未在本次范围）。APP_VERSION 仍为 0.0.2（未发版；下次发版记得同步）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

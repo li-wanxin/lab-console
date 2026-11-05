@@ -1724,7 +1724,7 @@ function openRecDialog(devId) {
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
   const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  $('#rec-path').value = `${dev.name.replace(' ', '')}记录_${stamp}.csv`;
+  $('#rec-path').value = `${dev.name.replace(' ', '')}记录_${stamp}.xlsm`;
   let dir = '';
   try { dir = localStorage.getItem('itech.recdir') || ''; } catch (e) { /* 忽略 */ }
   $('#rec-dir').value = dir;
@@ -1761,18 +1761,59 @@ async function confirmRec() {
     try { localStorage.setItem('itech.recdir', dir); } catch (e) { /* 忽略 */ }
     try { localStorage.setItem('itech.reciv', $('#rec-iv').value); } catch (e) { /* 忽略 */ }
     closeRecDialog();
-    toast('记录已开始，点击「结束记录」导出 CSV');
+    toast('记录已开始，点击「结束记录」导出 Excel');
   } catch (e) { toast(e.message, true); }
+}
+
+let exportCtx = null;   // {id, path, count, dev}
+
+function openExportDialog(info) {
+  exportCtx = info;   // {id, path, count, dev}
+  const dev = STATUS ? STATUS.devices.find(d => d.id === info.dev) : null;
+  $('#export-info').textContent =
+    `记录 #${info.id} · ${dev ? dev.name : ''} · ${info.count} 点 → ${info.path}`;
+  $('#export-overview').checked = true;
+  $('#export-chart').checked = true;
+  $('#export-mask').style.display = 'flex';
+}
+
+function closeExportDialog() {
+  $('#export-mask').style.display = 'none';
+  exportCtx = null;
+}
+
+async function confirmExport() {
+  if (!exportCtx) return;
+  const btn = $('#export-ok');
+  btn.disabled = true;
+  btn.textContent = '导出中…';
+  try {
+    const r = await api('/api/record/export', {
+      id: exportCtx.id,
+      overview: $('#export-overview').checked,
+      chart: $('#export-chart').checked,
+    });
+    toast(`已导出 Excel（${r.count} 点）\n${r.path}`);
+    closeExportDialog();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导出 Excel';
+  }
+}
+
+async function discardPending(id) {
+  try { await api('/api/record/discard', { id }); } catch (e) { toast(e.message, true); }
 }
 
 async function stopRecording(id, btn) {
   btn.disabled = true;
-  btn.textContent = '导出中…';
+  btn.textContent = '结束中…';
   try {
     const r = await api('/api/record/stop', { id });
-    toast(`记录已导出（${r.count} 点）\n${r.path}`);
-    const el = btn.closest('.rec-item');
-    if (el) el.remove();
+    toast(`记录 #${r.id} 已结束（${r.count} 点），请选择导出内容`);
+    openExportDialog({ id: r.id, path: r.path, count: r.count, dev: r.dev });
   } catch (e) {
     toast(e.message, true);
     btn.disabled = false;
@@ -1782,21 +1823,25 @@ async function stopRecording(id, btn) {
 
 function renderRecordings(st) {
   const recs = st.recordings || [];
+  const pendings = st.pending || [];
   st.devices.forEach(d => {
     const sec = $('#view-' + d.id);
     if (!sec) return;
     const bar = $('.rec-bar', sec);
     const list = recs.filter(r => r.dev === d.id);
+    const pends = pendings.filter(r => r.dev === d.id);
     // 负载只有一路：记录中直接隐藏「开始记录」按钮，防止重复开启
     if (d.role === 'load') {
       const btn = $('[data-act="rec"]', sec);
       if (btn) btn.style.display = list.length ? 'none' : '';
     }
-    // 服务端已结束的条目自动移除
+    // 服务端已结束/已丢弃的条目自动移除
     bar.querySelectorAll('.rec-item').forEach(el => {
-      if (!list.some(r => String(r.id) === el.dataset.id)) el.remove();
+      const keep = list.some(r => String(r.id) === el.dataset.id)
+        || pends.some(r => 'p' + r.id === el.dataset.id);
+      if (!keep) el.remove();
     });
-    if (!list.length) { bar.style.display = 'none'; return; }
+    if (!list.length && !pends.length) { bar.style.display = 'none'; return; }
     bar.style.display = 'flex';
     list.forEach(r => {
       let el = bar.querySelector(`.rec-item[data-id="${r.id}"]`);
@@ -1818,6 +1863,25 @@ function renderRecordings(st) {
       }
       const cnt = el.querySelector('.rec-count');
       if (cnt) cnt.textContent = r.count;
+    });
+    // 已结束待导出的条目
+    pends.forEach(r => {
+      const pid = 'p' + r.id;
+      let el = bar.querySelector(`.rec-item[data-id="${pid}"]`);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'rec-item done';
+        el.dataset.id = pid;
+        el.innerHTML =
+          `<i class="rec-dot" style="background:var(--dim-3,#888)"></i>` +
+          `<span class="rec-txt">记录 #${r.id} 已结束 · ${r.count} 点 · 未导出</span>` +
+          `<button class="tiny ghost pend-discard">丢弃</button>` +
+          `<button class="tiny pend-export">导出 Excel</button>`;
+        el.querySelector('.pend-export').onclick = () =>
+          openExportDialog({ id: r.id, path: r.path, count: r.count, dev: r.dev });
+        el.querySelector('.pend-discard').onclick = () => discardPending(r.id);
+        bar.appendChild(el);
+      }
     });
   });
 }
@@ -2325,6 +2389,8 @@ function bind() {
   });
   $('#rec-cancel').onclick = closeRecDialog;
   $('#rec-ok').onclick = confirmRec;
+  $('#export-cancel').onclick = closeExportDialog;
+  $('#export-ok').onclick = confirmExport;
   $('#rec-browse').onclick = async () => {
     const bridge = window.pywebview && window.pywebview.api;
     if (bridge && bridge.pick_dir) {

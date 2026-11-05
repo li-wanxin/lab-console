@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ITECH 测试台 · IT6302 + IT8511A+</title>
-<link rel="stylesheet" href="style.css?v=82">
+<link rel="stylesheet" href="style.css?v=83">
 </head>
 <body>
 
@@ -339,7 +339,7 @@
         <option value="60">1 分钟</option>
       </select>
     </label>
-    <p class="hint">记录按所选间隔采样写出 CSV；间隔越大数据量越小。可同时存在多条记录。</p>
+    <p class="hint">记录按所选间隔采样，结束记录后导出 Excel (.xlsm)；间隔越大数据量越小。可同时存在多条记录。</p>
     <div class="row">
       <button class="ghost" id="rec-cancel">取消</button>
       <button class="primary" id="rec-ok">确定开始</button>
@@ -347,6 +347,22 @@
   </div>
 </div>
 
-<script src="app.js?v=82"></script>
+<div class="modal-mask" id="export-mask" style="display:none">
+  <div class="modal" style="max-width:460px">
+    <h3>导出记录</h3>
+    <div class="export-info" id="export-info" style="margin-bottom:10px;color:var(--dim-2);font-size:12px"></div>
+    <div class="rec-chans" style="flex-direction:column;align-items:flex-start">
+      <label class="check"><input type="checkbox" id="export-overview" checked><span>测试概览（第一个标签页：仪器信息、起止时间、最大/最小/平均统计）</span></label>
+      <label class="check"><input type="checkbox" id="export-chart" checked><span>U/I/W 曲线图（最后一个标签页，Excel 内嵌图表）</span></label>
+    </div>
+    <p class="hint">文件为 Excel 工作簿 (.xlsm)，数据明细始终包含在「数据」表中。</p>
+    <div class="row">
+      <button class="ghost" id="export-cancel">取消</button>
+      <button class="primary" id="export-ok">导出 Excel</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=83"></script>
 </body>
 </html>
