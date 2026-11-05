@@ -1583,6 +1583,7 @@ function render(st) {
   S.ports = st.ports || [];
   const verEl = $('#app-ver');
   if (verEl && st.app_version) verEl.textContent = 'v' + st.app_version;
+  maybeShowUpdateDialog(st.update);
   ensurePanels(st);
   if (!S.booted) {
     S.booted = true;
@@ -1598,6 +1599,58 @@ function render(st) {
   renderRecordings(st);
   renderSweep(st);
   if (S.view === 'sweep') renderLink(st);
+}
+
+/* ---------------- 自动更新 ---------------- */
+let updateCtx = null;      // 当次弹窗对应的 update 状态
+let updateBusy = false;
+
+function maybeShowUpdateDialog(up) {
+  if (!up || !up.available || updateBusy) return;
+  const mask = $('#update-mask');
+  if (mask.style.display === 'flex') return;
+  let ignored = null;
+  try { ignored = localStorage.getItem('itech.update.ignore'); } catch (e) { /* 忽略 */ }
+  if (ignored === up.latest) return;          // 用户已忽略此版本
+  if (updateCtx && updateCtx.latest === up.latest) return;
+  updateCtx = up;
+  $('#update-body').innerHTML =
+    `当前版本 <b>v${STATUS.app_version}</b> → 最新版本 <b>v${up.latest}</b><br>` +
+    `更新将通过 GitHub 下载安装包，<b>不会强制更新</b>；` +
+    `便携版更新完成后需关闭并重新打开程序。`;
+  mask.style.display = 'flex';
+}
+
+function closeUpdateDialog() {
+  $('#update-mask').style.display = 'none';
+  updateCtx = null;
+}
+
+async function confirmUpdate() {
+  if (!updateCtx || updateBusy) return;
+  const btn = $('#update-ok');
+  updateBusy = true;
+  btn.disabled = true;
+  btn.textContent = '下载中…';
+  try {
+    const r = await api('/api/update/download', {});
+    closeUpdateDialog();
+    if (r.mode === 'dev' && r.url) { window.open(r.url, '_blank'); }
+    toast(r.message);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    updateBusy = false;
+    btn.disabled = false;
+    btn.textContent = '立即更新';
+  }
+}
+
+function skipUpdate() {
+  if (updateCtx) {
+    try { localStorage.setItem('itech.update.ignore', updateCtx.latest); } catch (e) { /* 忽略 */ }
+  }
+  closeUpdateDialog();
 }
 
 async function tick() {
@@ -2391,6 +2444,12 @@ function bind() {
   $('#rec-ok').onclick = confirmRec;
   $('#export-cancel').onclick = closeExportDialog;
   $('#export-ok').onclick = confirmExport;
+  $('#update-skip').onclick = skipUpdate;
+  $('#update-view').onclick = () => {
+    const u = updateCtx || (STATUS && STATUS.update);
+    if (u && u.html_url) window.open(u.html_url, '_blank');
+  };
+  $('#update-ok').onclick = confirmUpdate;
   $('#rec-browse').onclick = async () => {
     const bridge = window.pywebview && window.pywebview.api;
     if (bridge && bridge.pick_dir) {

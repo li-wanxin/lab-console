@@ -26,6 +26,8 @@ from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib import request as _urlreq
+from urllib.error import URLError
 from urllib.parse import parse_qs, quote, urlparse
 
 try:
@@ -63,8 +65,10 @@ HISTORY_POINTS = 20000       # 数据缓存点数 (约 4.4 小时 @0.8s)
 CHART_POINTS = 360           # 界面曲线降采样上限（全量历史均匀取点）
 TABLE_POINTS = 200           # 数据表取最近这么多原始点
 
-# 程序版本（发布用, 与 setup.iss 的 MyAppVersion 保持一致）; 界面资源版本 v81
-APP_VERSION = "0.0.2"
+# 程序版本（发布用, 与 setup.iss 的 MyAppVersion 保持一致）; 界面资源版本 v84
+APP_VERSION = "0.0.3"
+# GitHub 发布仓库（启动时检查更新用）
+GITHUB_REPO = "li-wanxin/lab-console"
 
 
 def list_dirs(p: str) -> dict:
@@ -146,6 +150,7 @@ class Bench:
         self.alerts: deque = deque(maxlen=60)
         self.recordings: dict = {}                   # id -> {id, dev, role, ...}
         self.pending_exports: dict = {}              # 已结束待导出: id -> rec
+        self.update_info: dict = {"available": False}
         self._rec_seq = 0
         self.sweep = {
             "running": False,
@@ -159,6 +164,8 @@ class Bench:
         self._busy = False
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._poll_thread.start()
+        # 启动 3 秒后联网检查更新（失败静默, 不影响使用）
+        threading.Thread(target=self._check_update_delayed, daemon=True).start()
         # 默认清单：一台电源 + 一台负载（可再增删）
         self.add_instrument("power")
         self.add_instrument("load")
@@ -467,6 +474,100 @@ class Bench:
                     dev.state["on"] = False
             self.log("error", "紧急停止: 已关闭所有电源输出与负载输入")
             return self.snapshot()
+
+    # ---------------- 更新检查 ----------------
+    def _check_update_delayed(self) -> None:
+        time.sleep(3.0)
+        self._check_update_once()
+
+    def _check_update_once(self) -> None:
+        """查询 GitHub 最新 Release, 结果存入 update_info; 网络失败静默。"""
+        info: dict = {"available": False, "checked_at": time.time()}
+        try:
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            req = _urlreq.Request(url, headers={
+                "User-Agent": f"LabConsole/{APP_VERSION}",
+                "Accept": "application/vnd.github+json",
+            })
+            with _urlreq.urlopen(req, timeout=8) as resp:
+                data = json.load(resp)
+            tag = str(data.get("tag_name", "")).lstrip("vV")
+            try:
+                latest = tuple(int(x) for x in tag.split("."))
+                current = tuple(int(x) for x in APP_VERSION.split("."))
+                newer = latest > current
+            except ValueError:
+                newer = tag != APP_VERSION
+            assets = [{"name": a["name"], "url": a["browser_download_url"],
+                       "size": a.get("size", 0)}
+                      for a in data.get("assets", [])
+                      if str(a.get("name", "")).lower().endswith(".exe")]
+            info.update({"latest": tag, "available": newer,
+                         "html_url": data.get("html_url", ""),
+                         "assets": assets})
+            if newer:
+                self.log("info", f"发现新版本 v{tag}（当前 v{APP_VERSION}），可在界面中选择更新")
+        except (URLError, OSError, ValueError, KeyError) as exc:
+            info["error"] = str(exc)[:200]        # 无网络/代理不通: 静默
+        with self.lock:
+            self.update_info = info
+
+    def update_download(self) -> dict:
+        """下载最新版并按运行形态处理: 便携版就位替换; 安装版启动安装向导。"""
+        with self.lock:
+            info = dict(self.update_info or {})
+        if not info.get("available"):
+            raise InstrumentError("当前已是最新版本，无需更新")
+        assets = info.get("assets") or []
+        frozen = getattr(sys, "frozen", False)
+        exe = Path(sys.executable) if frozen else None
+        if exe is None:                            # 开发模式: 引导去发布页
+            return {"mode": "dev", "url": info.get("html_url", ""),
+                    "message": "开发模式无法自动替换，已打开发布页，请手动下载"}
+
+        is_setup = exe.name.lower().startswith("labconsole")   # Inno 安装版
+        want = "LabConsole-Setup" if is_setup else "LabConsole-Portable"
+        asset = next((a for a in assets if a["name"].startswith(want)), None)
+        if asset is None:
+            raise InstrumentError(f"发布页未找到 {want} 安装包，请到发布页手动下载")
+
+        dest = Path(os.environ.get("TEMP", str(Path.home()))) / asset["name"]
+        self.log("info", f"开始下载更新: {asset['name']} ({asset['size'] // 1024 // 1024} MB)")
+        try:
+            req = _urlreq.Request(asset["url"], headers={"User-Agent": f"LabConsole/{APP_VERSION}"})
+            with _urlreq.urlopen(req, timeout=120) as resp, open(dest, "wb") as f:
+                while True:
+                    chunk = resp.read(1 << 16)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+        except Exception as exc:  # noqa: BLE001
+            raise InstrumentError(f"下载失败（可能需要网络代理）: {exc}")
+
+        if is_setup:
+            os.startfile(str(dest))                # 安装向导接管, 覆盖安装
+            self.log("ok", f"更新安装向导已启动 → {dest}")
+            return {"mode": "setup", "path": str(dest),
+                    "message": "安装向导已启动，按提示完成覆盖安装后重新打开程序即可"}
+
+        # 便携版: 运行中的 exe 允许改名（不允许覆盖），三步就位替换
+        new = exe.with_name(exe.stem + "_更新下载.exe")
+        old = exe.with_name(exe.stem + "_旧版本.exe")
+        try:
+            dest.replace(new)
+            try:
+                old.unlink()
+            except OSError:
+                pass
+            exe.rename(old)
+            new.rename(exe)
+        except Exception as exc:  # noqa: BLE001
+            raise InstrumentError(
+                f"自动替换失败（{exc}）。新版本已下载到 {new}，"
+                f"请关闭本程序后手动将其重命名为「{exe.name}」")
+        self.log("ok", "便携版更新已就位，关闭程序后重新打开即为新版本")
+        return {"mode": "portable", "path": str(exe),
+                "message": "更新已就位！请完全关闭本程序，然后重新打开即为新版本"}
 
     # ---------------- 轮询 ----------------
     def _poll_loop(self) -> None:
@@ -1065,6 +1166,7 @@ class Bench:
             return {
                 "ts": time.time(),
                 "app_version": APP_VERSION,
+                "update": self.update_info,
                 "devices": [d.payload() for d in self.devices.values()],
                 "models": MODEL_CATALOG,
                 # 各型号串口能力: 前端波特率下拉据此按型号渲染
@@ -1251,6 +1353,8 @@ class Handler(BaseHTTPRequestHandler):
                     body["id"], bool(body.get("overview", True)), bool(body.get("chart", True))))
             if path == "/api/record/discard":
                 return self._json(BENCH.record_discard(body["id"]))
+            if path == "/api/update/download":
+                return self._json(BENCH.update_download())
             if path == "/api/fs/mkdir":
                 target = Path(body.get("path", ""))
                 if not str(target).strip():

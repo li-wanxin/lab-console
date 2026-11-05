@@ -136,6 +136,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-05 上午（时间列宽修复）**：用户反馈导出 Excel 时间列太窄显示 ####（"yyyy-mm-dd hh:mm:ss.000" 共 23 字符，原宽 21 不够）。数据表 A 列宽 21→24，验证通过。dist exe 重打包（08:51 版）。
 
+- **2026-11-05 上午（v0.0.3 发布：自动更新功能）**：**启动联网检查更新**。后端：Bench 启动 3s 后 daemon 线程查 GitHub API releases/latest（UA 必带，timeout 8s，失败静默），tag 三段数字比较判断 available，结果随 /api/status 的 update 字段下发（含 assets 列表）。POST /api/update/download：按 exe 名判断形态——LabConsole*（Inno 安装版）→ 下载 Setup 到 %TEMP% 并 os.startfile 启动安装向导覆盖安装；ITECH测试台.exe（便携版）→ 下载 Portable 到 %TEMP%，利用 Windows 允许改名运行中 exe 的特性三步就位替换（新包→stem_更新下载.exe，当前 exe→stem_旧版本.exe，新包改名回原名），失败回滚提示手动替换；开发模式只打开发布页。前端 #update-mask 弹窗（非强制：立即更新 / 查看看板 / 忽略此版本，忽略版本号存 localStorage，render 里 maybeShowUpdateDialog 防重弹）。真实验证：8799 服务正确查到 latest v0.0.2 与两个 asset，本地 0.0.3 > 0.0.2 判断不弹。APP_VERSION=0.0.3，setup.iss 同步，界面 v84，dist 便携版 20.2MB + Output 安装包 22MB 均已产出，发 Release v0.0.3。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

@@ -3,7 +3,7 @@
 
 #define MyAppName "Lab Console"
 #define MyAppNameZh "ITECH测试台"
-#define MyAppVersion "0.0.2"
+#define MyAppVersion "0.0.3"
 #define MyAppPublisher "li-wanxin"
 #define MyAppURL "https://github.com/li-wanxin/lab-console"
 #define MyAppExeName "LabConsole.exe"
@@ -27,9 +27,9 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
-VersionInfoVersion=0.0.2.0
+VersionInfoVersion=0.0.3.0
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion=0.0.2.0
+VersionInfoProductVersion=0.0.3.0
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
