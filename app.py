@@ -808,10 +808,11 @@ class Bench:
                 chans = sorted({c for o in rec_outs for c in o["chs"]})
             path = str(path or "").strip()
             if not path:
-                path = f"{dev.name.replace(' ', '')}记录_{time.strftime('%Y%m%d_%H%M%S')}.xlsm"
-            # 统一导出为 Excel 工作簿 (.xlsm)；填了其他后缀一律改写
-            if not path.lower().endswith(".xlsm"):
-                path = str(Path(path).with_suffix(".xlsm"))
+                path = f"{dev.name.replace(' ', '')}记录_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
+            # 统一导出为 Excel 工作簿 (.xlsx)。不用 .xlsm: Excel 要求 xlsm 内部
+            # 必须携带 VBA 宏项目, 无宏的 xlsm 会被 Excel 拒绝打开 (实测 2026-11-05)。
+            if not path.lower().endswith(".xlsx"):
+                path = str(Path(path).with_suffix(".xlsx"))
             target = Path(path)
             try:
                 if str(target.parent) not in ("", "."):
@@ -889,7 +890,6 @@ class Bench:
         self.log("ok", f"记录 #{rec['id']} 已导出 {len(rows)} 点 ({what.rstrip(' + ')}) → {path}")
         return {"ok": True, "path": path, "count": len(rows),
                 "overview": overview, "chart": chart}
-
     @staticmethod
     def _combined_point(d: dict, o: dict) -> list:
         """逻辑输出取值：单通道直读；组合按串联 ΣV/min I、并联 V/ΣI。d 为该机采样。"""
@@ -929,7 +929,7 @@ class Bench:
         return datetime.fromtimestamp(t)
 
     def _write_recording_xlsm(self, rec: dict, rows: list, overview: bool, chart: bool) -> None:
-        """导出 .xlsm: [概览(可选)] + 数据 + [曲线图(可选)]。"""
+        """导出 .xlsx: [概览(可选,第一页)] + 数据 + [曲线图(可选,最后页)]。"""
         cols = self._rec_columns(rec)
         num_cols = [c for c in cols if c[1] is not None and c[0] != "工作模式"]
 
