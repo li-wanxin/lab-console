@@ -876,6 +876,10 @@ class Bench:
             chart = bool(chart)
         try:
             self._write_recording_xlsm(rec, rows, overview, chart)
+        except PermissionError:
+            raise InstrumentError(
+                "文件正被占用，无法写出——通常是因为它已用 Excel/WPS 打开。"
+                "请关闭 Excel 后，在记录条上点「导出 Excel」重试；记录数据未丢失。")
         except Exception as exc:  # noqa: BLE001
             raise InstrumentError(f"写出 Excel 失败: {exc}")
         with self.lock:

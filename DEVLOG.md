@@ -124,6 +124,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-05 上午（界面 v83，记录导出改版）**：**记录导出从 CSV 改为 Excel (.xlsm) + 导出选项对话框**。流程：结束记录 → 停止采样并挂起（recordings→pending_exports，快照新增 pending 列表）→ 前端弹 #export-mask 对话框勾选「测试概览」「U/I/W 曲线图」（默认都勾）→ POST /api/record/export{id,overview,chart} 生成 xlsm；取消可关窗，rec-bar 留"待导出"条目（导出 Excel/丢弃按钮，/api/record/discard）。xlsm 结构：[概览(可选,第一页)] + 数据 + [曲线图(可选,最后页)]；概览含仪器名/型号/IDN、记录对象、起止时间、点数、间隔、各数值列 min/max/avg；曲线为 openpyxl LineChart（数据源引用数据表，时间类别轴）。数据表时间列为 datetime（格式 yyyy-mm-dd hh:mm:ss.000），record_start 文件名强制 .xlsm，重名检查涵盖 pending。依赖 openpyxl>=3.1（requirements + PyInstaller --collect-all openpyxl，dist exe 已重打包 20.2MB）。验证：模拟端到端（负载单路/电源双输出）、无概览分支、读回 sheet 顺序与统计、对话框截图。IV 扫描导出仍为 CSV（未在本次范围）。APP_VERSION 仍为 0.0.2（未发版；下次发版记得同步）。
 
+- **2026-11-05 上午（导出报错处理）**：用户真机导出报 "Error 13 Permission denied"。复现确认根因：**目标 .xlsm 文件被 Excel/WPS 独占占用**（Windows 打开 Excel 即锁文件），wb.save 写不进。数据安全设计验证：record_export 中 pending pop 在成功之后，失败不丢数据，可重试。改进：PermissionError 单独捕获，错误提示改为中文指引（"关闭 Excel 后在记录条上点「导出 Excel」重试；数据未丢失"）。dist 便携版重打包（运行中无法覆盖 → 打包到 dist_new 后成功替换，08:36 版 20.2MB）。复现脚本 repro_err13.py（工作区根，FileShare.None 独占锁模拟 Excel；注意 python os.open 句柄不锁文件，不能用来模拟）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
