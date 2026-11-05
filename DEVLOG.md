@@ -132,6 +132,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-05 上午（导出格式修复：xlsm→xlsx）**：用户真机导出的 .xlsm 用 Excel 打不开（"文件格式或扩展名无效"）。排查：文件 zip 结构完整、openpyxl 可读、sheet 齐全——坏在 **Excel 对 .xlsm 硬性要求内部携带 vbaProject.bin（VBA 宏项目）**，openpyxl 从零创建的工作簿没有宏项目，产出的 .xlsm 不合法（上次只验证了 zip 结构，教训）。修复：导出格式全面改 **.xlsx**（无宏要求，Excel 100% 兼容；三页结构/概览统计/图表全部不变），record_start 强制后缀 .xlsx（填 .xlsm 也自动转），前端默认名与文案同步。已验证 content type 为标准 xlsx main+xml、三页齐全。用户桌面已有的坏文件：直接把扩展名改成 .xlsx 即可打开（内容是好的）。dist exe 重打包（08:46 版 20.2MB）。若用户将来确需带宏的 .xlsm：方案是内置一个带空宏项目的 xlsm 模板 + load_workbook(keep_vba=True)，待用户确认再做。
 
+- **2026-11-05 上午（时间列宽修复）**：用户反馈导出 Excel 时间列太窄显示 ####（"yyyy-mm-dd hh:mm:ss.000" 共 23 字符，原宽 21 不够）。数据表 A 列宽 21→24，验证通过。dist exe 重打包（08:51 版）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

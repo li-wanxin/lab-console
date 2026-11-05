@@ -951,7 +951,8 @@ class Bench:
         # 时间列格式: 毫秒精度 (记录间隔可小于 1s)
         for r in range(2, len(rows) + 2):
             ws.cell(row=r, column=1).number_format = "yyyy-mm-dd hh:mm:ss.000"
-        ws.column_dimensions["A"].width = 21
+        # 宽度 24: 时间串 "yyyy-mm-dd hh:mm:ss.000" 共 23 字符, 窄了会显示成 ####
+        ws.column_dimensions["A"].width = 24
         for i in range(2, len(cols) + 1):
             ws.column_dimensions[get_column_letter(i)].width = 14
         for cell in ws[1]:
