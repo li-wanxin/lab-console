@@ -135,3 +135,8 @@ end;
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+
+[Messages]
+; AppMutex 检测到程序在运行时的提示, 默认是英文, 覆盖为中文
+SetupAppRunningError=安装程序检测到 %1 正在运行。%n%n请先关闭它的所有窗口（必要时在任务管理器结束 LabConsole.exe），然后点击"确定"继续安装，或点击"取消"退出。
+UninstallAppRunningError=卸载程序检测到 %1 正在运行。%n%n请先关闭它的所有窗口，然后点击"确定"继续，或点击"取消"退出。
