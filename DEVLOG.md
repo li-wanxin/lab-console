@@ -140,6 +140,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-05 上午（v0.0.3 发布：自动更新功能）**：**启动联网检查更新**。后端：Bench 启动 3s 后 daemon 线程查 GitHub API releases/latest（UA 必带，timeout 8s，失败静默），tag 三段数字比较判断 available，结果随 /api/status 的 update 字段下发（含 assets 列表）。POST /api/update/download：按 exe 名判断形态——LabConsole*（Inno 安装版）→ 下载 Setup 到 %TEMP% 并 os.startfile 启动安装向导覆盖安装；ITECH测试台.exe（便携版）→ 下载 Portable 到 %TEMP%，利用 Windows 允许改名运行中 exe 的特性三步就位替换（新包→stem_更新下载.exe，当前 exe→stem_旧版本.exe，新包改名回原名），失败回滚提示手动替换；开发模式只打开发布页。前端 #update-mask 弹窗（非强制：立即更新 / 查看看板 / 忽略此版本，忽略版本号存 localStorage，render 里 maybeShowUpdateDialog 防重弹）。真实验证：8799 服务正确查到 latest v0.0.2 与两个 asset，本地 0.0.3 > 0.0.2 判断不弹。APP_VERSION=0.0.3，setup.iss 同步，界面 v84，dist 便携版 20.2MB + Output 安装包 22MB 均已产出，发 Release v0.0.3。
 
+- **2026-11-07 上午（曲线图美化，应用户真机反馈）**：用户真机导出文件（负载 377 点）三大问题逐一排查修复：① **没曲线**——旧实现把 6 列全部丢进一个折线图，"工作模式"文本列混入导致 Excel 渲染异常；② **轴刻度/单位缺失**——openpyxl 默认 x_axis.axPos='l'（左侧！应为底部）、缺 tickLblPos 与 delete=False 显式设置，且类别轴 numRef 引用 datetime 列显示内部序列号而非时间；③ **只画 U/I/W**。新实现：「曲线图」页改为**三张独立图**（电压/V、电流/A、功率/W 各自 Y 轴标题带单位、x 轴时间、axPos/tickLblPos/delete 全部显式修正、单系列无图例），数据表尾部加灰色辅助列"时间(曲线用)"（字符串 hh:mm:ss）作类别源（datetime numRef 坑），电源多路时每图多系列（逐系列单独 add_data 兼容不连续列）。用用户真实文件（377 点）重导验证：3 图结构、引用列仅 B/C/D+G、轴属性全部正确，产出 桌面/负载1记录_20261107_085425_美化验证.xlsx 供用户 Excel 实机确认。已提交推送（界面未变版仍 v84）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
