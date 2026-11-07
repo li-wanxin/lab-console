@@ -170,6 +170,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 上午（手动检查更新入口，界面 v85）**：应用户要求增加随时可触发的版本检查。后端新增 POST /api/update/check（Bench.update_check：同步调 _check_update_once 后返回最新 update_info，请求线程内执行、8s 超时）。前端：顶栏版本徽章 #app-ver 变为可点击入口（hover 高亮 --accent、title"程序版本（点击检查更新）"），点击→徽章显示"检测中…"（manualCheckBusy 防重入、render 加守卫防 tick 覆盖）→ 结果反馈：有新版弹更新对话框（maybeShowUpdateDialog 加 force 参数，手动检查无视"忽略此版本"记录）、无新版 toast"当前已是最新版本 vX（GitHub 最新 vY）"、网络失败 toast 报错。真实验证：/api/update/check 查到 latest=0.0.3 available=False assets 两项；截图确认 toast 与徽章恢复。dist exe 重打包。
 
+- **2026-11-07 上午（更新检查 403 限流修复）**：用户手动检查更新报 "HTTP Error 403: rate limit exceeded"。根因：GitHub 匿名 API 每 IP 每小时仅 60 次（共享出口网络/反复点检极易耗尽）。修复 _check_update_once：① **ETag 条件请求**——首次成功记住响应 ETag，之后带 If-None-Match，GitHub 对 304 响应**不计数**，检查基本不再消耗配额（官方特性）；② **403/429 分支**——中文提示限流原因+发布页直链，且**保留上次成功结果**（latest/available 不丢，error 字段仅作提示）；③ 304 时清掉历史 error 并刷新 checked_at。单测验证：200→ETag→304 缓存路径 latest 保留；mock 403 → 友好提示+结果保留。dist exe 重打包。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

@@ -27,7 +27,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import request as _urlreq
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlparse
 
 try:
@@ -153,6 +153,7 @@ class Bench:
         self.recordings: dict = {}                   # id -> {id, dev, role, ...}
         self.pending_exports: dict = {}              # 已结束待导出: id -> rec
         self.update_info: dict = {"available": False}
+        self._update_etag: str = ""                  # GitHub ETag: 条件请求 304 不消耗 API 配额
         self._rec_seq = 0
         self.sweep = {
             "running": False,
@@ -483,16 +484,48 @@ class Bench:
         self._check_update_once()
 
     def _check_update_once(self) -> None:
-        """查询 GitHub 最新 Release, 结果存入 update_info; 网络失败静默。"""
+        """查询 GitHub 最新 Release, 结果存入 update_info; 网络失败静默。
+
+        配额策略: 匿名 API 每 IP 每小时仅 60 次 (共享出口网络极易耗尽, 403)。
+        GitHub 对带 If-None-Match 的条件请求返回 304 时**不计数** —— 首次成功
+        后记住 ETag, 之后检查都走 304 缓存, 基本不再消耗配额。
+        """
+        with self.lock:
+            prev = dict(self.update_info or {})
+            etag = self._update_etag
         info: dict = {"available": False, "checked_at": time.time()}
         try:
             url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-            req = _urlreq.Request(url, headers={
+            headers = {
                 "User-Agent": f"LabConsole/{APP_VERSION}",
                 "Accept": "application/vnd.github+json",
-            })
-            with _urlreq.urlopen(req, timeout=8) as resp:
-                data = json.load(resp)
+            }
+            if etag:
+                headers["If-None-Match"] = etag
+            req = _urlreq.Request(url, headers=headers)
+            try:
+                with _urlreq.urlopen(req, timeout=8) as resp:
+                    data = json.load(resp)
+                new_etag = resp.headers.get("ETag", "")
+            except HTTPError as he:
+                if he.code == 304 and prev.get("latest"):
+                    prev["checked_at"] = time.time()
+                    prev.pop("error", None)          # 限流错误随缓存一并清除
+                    with self.lock:
+                        self.update_info = prev
+                    return
+                if he.code in (403, 429):
+                    msg = ("GitHub API 限流（403 rate limit exceeded）——匿名接口每 IP 每小时 60 次。"
+                           "程序已改用缓存请求避免此问题，请几分钟后再试；"
+                           "也可直接到发布页下载：https://github.com/" + GITHUB_REPO + "/releases/latest")
+                    info = dict(prev) if prev.get("latest") else info
+                    info["checked_at"] = time.time()
+                    info["error"] = msg
+                    self.log("warn", "检查更新被 GitHub 限流 (403)，请稍后再试")
+                    with self.lock:
+                        self.update_info = info
+                    return
+                raise
             tag = str(data.get("tag_name", "")).lstrip("vV")
             try:
                 latest = tuple(int(x) for x in tag.split("."))
@@ -509,10 +542,13 @@ class Bench:
                          "assets": assets})
             if newer:
                 self.log("info", f"发现新版本 v{tag}（当前 v{APP_VERSION}），可在界面中选择更新")
+            with self.lock:
+                self._update_etag = new_etag or etag
+                self.update_info = info
         except (URLError, OSError, ValueError, KeyError) as exc:
             info["error"] = str(exc)[:200]        # 无网络/代理不通: 静默
-        with self.lock:
-            self.update_info = info
+            with self.lock:
+                self.update_info = info
 
     def update_check(self) -> dict:
         """手动检查更新: 同步查询 GitHub 并返回最新结果 (供界面按钮调用)。"""
