@@ -82,5 +82,56 @@ begin
     CleanTempInstallers;
 end;
 
+// ---- 安装前兜底检测目标 exe 是否被占用 ----
+// AppMutex 只能检测 v0.0.6+ 的程序 (旧版本不创建互斥量, 无窗口僵尸进程也查不到)。
+// 这里直接以独占方式打开 {app}\LabConsole.exe 试锁: 打不开说明在运行/残留,
+// 提示用户先关闭再重试, 避免走到覆盖文件一步才报"拒绝访问"。
+const
+  GENERIC_WRITE = $40000000;
+  OPEN_EXISTING = 3;
+  INVALID_HANDLE_VALUE = $FFFFFFFF;
+  CRLF = #13#10;
+
+function CreateFileW(lpFileName: String; dwDesiredAccess, dwShareMode,
+  lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes,
+  hTemplateFile: Cardinal): Cardinal;
+  external 'CreateFileW@kernel32.dll stdcall';
+
+function CloseHandle(hObject: Cardinal): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function IsFileLocked(const Path: String): Boolean;
+var
+  H: Cardinal;
+begin
+  H := CreateFileW(Path, GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0);
+  if H = INVALID_HANDLE_VALUE then
+    Result := True
+  else begin
+    CloseHandle(H);
+    Result := False;
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExePath, Msg: String;
+  Ret: Integer;
+begin
+  Result := '';
+  ExePath := ExpandConstant('{app}\{#MyAppExeName}');
+  while FileExists(ExePath) and IsFileLocked(ExePath) do
+  begin
+    Msg := '检测到 Lab Console 正在运行（或进程残留），无法覆盖程序文件。' + CRLF + CRLF +
+      '请先退出 Lab Console（必要时在任务管理器结束 LabConsole.exe），然后点击"重试"继续安装。';
+    Ret := MsgBox(Msg, mbError, MB_RETRYCANCEL);
+    if Ret = IDCANCEL then
+    begin
+      Result := 'Lab Console 正在运行，已取消安装。请关闭程序后重新运行安装包。';
+      exit;
+    end;
+  end;
+end;
+
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
