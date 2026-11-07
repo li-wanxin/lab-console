@@ -133,6 +133,15 @@ class IT6302:
     MAX_I = 3.0
     MAX_P = {1: 90.0, 2: 90.0, 3: 15.0}
 
+    @classmethod
+    def open(cls, port: str, baud: int):
+        """统一构造入口: MODELS 注册表的 driver.open(port, baud) 调这里。
+
+        注意必须写成类内 classmethod —— 若从别的类"取下" classmethod 再挂到
+        本类, 它仍绑定在原类上, cls 会错成 mixin (2026-11-07 真机连接翻车)。
+        """
+        return cls(SerialTransport(port, baud))
+
     def __init__(self, transport: SerialTransport):
         self.t = transport
         self._idn = self.t.query("*IDN?")
@@ -190,6 +199,11 @@ class IT8511A:
     MODES = {"CURR": "CC", "VOLT": "CV", "RES": "CR", "POW": "CW"}
     SET_CMD = {"CC": "CURR", "CV": "VOLT", "CR": "RES", "CW": "POW"}
 
+    @classmethod
+    def open(cls, port: str, baud: int):
+        """统一构造入口 (IT8511A SCPI 驱动, 当前未注册进 MODELS, 保留备用)。"""
+        return cls(SerialTransport(port, baud))
+
     def __init__(self, transport: SerialTransport):
         self.t = transport
         self._idn = self.t.query("*IDN?")
@@ -237,11 +251,16 @@ class IT8510Legacy:
     量程 (官方规格书 + 真机拒绝法验证): 120V/20A/120W (保护设定上限 130W), CR 4000Ω, CC 0.1mA 步进。
     """
 
-    LEGACY_SERIAL = True  # app.py 据此用 (port, baud) 而非 SerialTransport 构造
+    LEGACY_SERIAL = True  # (兼容标记, 已不用于构造; 统一走 open 类方法)
     model = "IT8510"
     MAX_V = 120.0
     MAX_I = 20.0
     MAX_P = 120.0
+
+    @classmethod
+    def open(cls, port: str, baud: int):
+        """统一构造入口: 二进制协议驱动自管串口 (IT8511APlusLegacy 继承)。"""
+        return cls(port, baud)
 
     # 模式名沿用 IT8500+ 面板叫法: CW = 恒功率 (Constant Wattage, 老手册写作 CP);
     # 帧协议命令码不变 (CW 档 = 0x02, 电平命令 0x2E/0x2F)。
@@ -551,27 +570,6 @@ class SimLoad:
 #   channels     通道数 (电源); 负载固定 1
 #   baud_rates / baud_default
 #   ranges       负载量程字典 (max_v/max_i/max_p/max_r)
-class ScpiTransportMixin:
-    """SCPI 驱动的统一构造入口: 与二进制协议驱动保持同一 open() 签名。"""
-
-    @classmethod
-    def open(cls, port: str, baud: int):
-        return cls(SerialTransport(port, baud))
-
-
-class LegacyTransportMixin:
-    """二进制帧协议驱动的统一构造入口: 驱动自身管理串口参数。"""
-
-    @classmethod
-    def open(cls, port: str, baud: int):
-        return cls(port, baud)
-
-
-# 统一构造入口: 真实驱动一律 entry["driver"].open(port, baud) 创建,
-# 协议差异 (SCPI 包 SerialTransport / 二进制协议自管串口) 由各自 open 吸收。
-IT6302.open = ScpiTransportMixin.open
-IT8511A.open = ScpiTransportMixin.open
-IT8510Legacy.open = LegacyTransportMixin.open      # IT8511APlusLegacy 继承之
 
 MODELS: dict[str, dict[str, dict]] = {
     "power": {

@@ -186,6 +186,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 下午（便携版更名 LabConsole-Portable.exe）**：应用户要求去掉旧命名。便携版 dist/LabConsole-Portable.exe（原 ITECH测试台.exe，旧文件已删）；安装后仍为 LabConsole.exe。**更新分流逻辑同步重写**：原按 exe 名前缀 startswith("labconsole") 判安装版——便携版更名后必误判；改为「exe 同目录存在 Inno 卸载器文件 (unins*) 优先」+「exe 恰叫 LabConsole.exe」兜底，旧命名拷贝/任意改名拷贝均不误判（逻辑自检 5 例 PASS）。同步更新 setup.iss 源路径、打包.bat、README、desktop.py 注释。exe 图标资源校验正常。**注意：已安装的旧版程序（v0.0.4 安装版）内部仍是旧判定，但旧判定对 LabConsole.exe 同样判安装版，行为无回归**。Release 附件未动（用户新规则）。PyInstaller spec 文件 ITECH测试台.spec 已过时（构建命令以 打包.bat/build 指令为准）。
 
+- **2026-11-07 下午（真机连接崩溃修复）**：用户真机连负载报 "LegacyTransportMixin() takes no arguments"。根因：重构时把 @classmethod 从 mixin 类"取下"再挂到驱动类（IT8510Legacy.open = LegacyTransportMixin.open），取下的 classmethod **仍绑定在 mixin 类上**，调用时 cls=mixin → 试图实例化 mixin → TypeError。模拟模式测不到该路径（走 entry["sim"]），真机一接即炸——**回归盲区**。修复：废弃 mixin 方案，open 类方法直接写在各驱动类内（IT6302/IT8511A/IT8510Legacy，APlus 继承），并留注释警示。无硬件验证法：① open.__self__ 断言绑定到驱动类本身；② 用不存在的端口调 open，应得 InstrumentError("打开串口…失败") 而非 TypeError——三型号全过。教训：**新增构造路径必须有不依赖硬件的冒烟（坏端口法）**，已可复用。便携版 14:37 重打包（用户关闭程序后成功替换），安装包 14:36 重编（含修复版 exe）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
