@@ -184,6 +184,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 下午（架构改造：多仪器扩展 + Mac 移植准备）**：复查后四项结构性改动（**不改版本号/不动 Release**，纯内部重构，行为完全兼容，模拟端到端回归通过）：① **sysenv.py**——跨平台差异层（app_data_dir 三平台/open_external/list_roots/documents_dir），os.startfile、%APPDATA%、盘符枚举全部收编，Mac 移植只改此文件；② **instruments.py 统一注册表**——原 4 张分散表（LOAD_MODEL_SPECS/LOAD_DRIVERS/POWER_MODEL_SPECS/MODEL_CATALOG）合并为单一 `MODELS[role][model]`（driver/sim/label/channels/baud/ranges），派生视图保留兼容；驱动统一 `open(port,baud)` 构造入口（ScpiTransportMixin/LegacyTransportMixin），Bench.connect 消灭 LEGACY_SERIAL 分支——**新增型号=注册表加一个条目**；③ **recording.py**——xlsx 导出（列定义/统计/双轴图表/经验注释）整体拆出（app.py 69KB→57KB），rec_columns 支持新角色加分支；④ **前端 ROLE_PANELS 注册表**——面板 html/render/curves 三件套按角色注册，分发逻辑不再 if/else。新增 ARCHITECTURE.md（扩展指南）与 PORTING.md（Mac 移植清单）+ build.sh（macOS/Linux 构建，--onedir .app 形态）。回归：注册表/统一构造/模拟联动/负载记录导出三页/电源双路分图全部 PASS，UI 截图无异常。坑：MODELS 引用后置定义的模拟器类，注册表须置于文件末尾。
 
+- **2026-11-07 下午（便携版更名 LabConsole-Portable.exe）**：应用户要求去掉旧命名。便携版 dist/LabConsole-Portable.exe（原 ITECH测试台.exe，旧文件已删）；安装后仍为 LabConsole.exe。**更新分流逻辑同步重写**：原按 exe 名前缀 startswith("labconsole") 判安装版——便携版更名后必误判；改为「exe 同目录存在 Inno 卸载器文件 (unins*) 优先」+「exe 恰叫 LabConsole.exe」兜底，旧命名拷贝/任意改名拷贝均不误判（逻辑自检 5 例 PASS）。同步更新 setup.iss 源路径、打包.bat、README、desktop.py 注释。exe 图标资源校验正常。**注意：已安装的旧版程序（v0.0.4 安装版）内部仍是旧判定，但旧判定对 LabConsole.exe 同样判安装版，行为无回归**。Release 附件未动（用户新规则）。PyInstaller spec 文件 ITECH测试台.spec 已过时（构建命令以 打包.bat/build 指令为准）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

@@ -612,7 +612,14 @@ class Bench:
             return {"mode": "dev", "url": info.get("html_url", ""),
                     "message": "开发模式无法自动替换，已打开发布页，请手动下载"}
 
-        is_setup = exe.name.lower().startswith("labconsole")   # Inno 安装版
+        # 运行形态判定: 安装版 = Inno 卸载器文件在同目录 (最可靠, {app} 下必有
+        # unins000.exe/dat), 或 exe 恰好叫 LabConsole.exe (安装器固定名)。
+        # 便携版名 LabConsole-Portable.exe, 不会误判 (2026-11-07 由 ITECH测试台.exe 更名)。
+        try:
+            has_unins = any(exe.parent.glob("unins*"))
+        except OSError:
+            has_unins = False
+        is_setup = has_unins or exe.name.lower() == "labconsole.exe"
         want = "LabConsole-Setup" if is_setup else "LabConsole-Portable"
         asset = next((a for a in assets if a["name"].startswith(want)), None)
         if asset is None:

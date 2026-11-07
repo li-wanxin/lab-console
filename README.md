@@ -53,7 +53,7 @@ IT6302 CH1 (-) ──────── IT8511A+ (-)
 
 ### 方式 A：直接运行打包好的程序
 
-双击 `dist\ITECH测试台.exe`。**单文件、免安装**，不依赖 Python 环境，也不需要浏览器。
+双击 `dist\LabConsole-Portable.exe`。**单文件、免安装**，不依赖 Python 环境，也不需要浏览器。
 
 > ⚠️ `dist/` 里的 exe 是早期版本打包的，**界面落后于当前源码（v55）**，重新打包前请以源码运行方式为准。
 
@@ -76,7 +76,7 @@ python app.py                # 浏览器模式 http://127.0.0.1:8765
 双击 `打包.bat`，或：
 
 ```bash
-python -m PyInstaller --onefile --windowed --name "ITECH测试台" ^
+python -m PyInstaller --onefile --windowed --name "LabConsole-Portable" ^
   --icon app.ico --add-data "web;web" desktop.py
 ```
 

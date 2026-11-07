@@ -8,11 +8,11 @@ python -m pip install --quiet pyinstaller pillow
 
 echo [2/2] 生成单文件程序 ...
 python -m PyInstaller --noconfirm --clean --onefile --windowed ^
-  --name "ITECH测试台" ^
+  --name "LabConsole-Portable" ^
   --icon app.ico ^
   --add-data "web;web" ^
   desktop.py
 
 echo.
-echo 完成：dist\ITECH测试台.exe
+echo 完成：dist\LabConsole-Portable.exe
 pause
