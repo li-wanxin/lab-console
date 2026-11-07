@@ -1122,13 +1122,15 @@ class Bench:
             ov.column_dimensions["C"].width = 12
             ov.column_dimensions["D"].width = 12
 
-        # ---- 曲线图 (最后一页): 电压/电流/功率各一张, 只画数值列 ----
+        # ---- 曲线图 (最后一页): 单张图, 电压/电流/功率三色曲线 ----
         # 教训 (2026-11-07 真机文件排查):
         #   1. "工作模式"是文本列, 混入折线图会让 Excel 渲染异常 (整图无曲线);
         #   2. 类别轴直接引用 datetime 列时 openpyxl 生成 numRef, Excel 显示
         #      内部序列号而非时间 —— 需要时间文本辅助列做类别源;
         #   3. openpyxl 默认 x_axis.axPos='l' 且缺 tickLblPos/delete, 轴会错位/隐藏,
         #      必须显式 axPos='b'、tickLblPos、delete=False。
+        #   4. 三张独立图配色各异且分散 —— 合并为单图固定三色
+        #      (电压蓝/电流红/功率绿; IT8511A+ 三量纲数值范围同为 0~150, 共轴可读)。
         if chart and rows:
             tcol = len(cols) + 1                    # 辅助列: 时间文本 (类别源)
             hc = ws.cell(row=1, column=tcol, value="时间(曲线用)")
@@ -1140,47 +1142,43 @@ class Bench:
 
             ch = wb.create_sheet("曲线图")
             ch.sheet_view.showGridLines = False
-            unit_of = {"电压": "V", "电流": "A", "功率": "W"}
-            groups = []
-            for label in ("电压", "电流", "功率"):
-                members = [i for i, c in enumerate(cols) if label in c[0]]
-                if members:
-                    groups.append((label, members))
+            nch = LineChart()
+            nch.title = "U / I / W 记录曲线"
+            nch.style = 2
+            nch.height, nch.width = 11, 28
+            nch.y_axis.title = "数值 (V / A / W)"
+            nch.x_axis.title = "时间"
+            nch.x_axis.delete = False
+            nch.y_axis.delete = False
+            nch.x_axis.axPos = "b"
+            nch.y_axis.axPos = "l"
+            nch.x_axis.tickLblPos = "low"
+            nch.y_axis.tickLblPos = "nextTo"
+            nch.x_axis.tickLblSkip = max(1, len(rows) // 10)
+            nch.x_axis.tickMarkSkip = max(1, len(rows) // 10)
+            nch.y_axis.majorGridlines = ChartLines()
+            cats = Reference(ws, min_col=tcol, min_row=2, max_row=len(rows) + 1)
 
-            max_row = len(rows) + 1
-            skip = max(1, len(rows) // 10)
-            anchors = ["B2", "B23", "B44"]
-            for gi, (label, members) in enumerate(groups):
-                nch = LineChart()
-                nch.title = f"{label}记录曲线"
-                nch.style = 2
-                nch.height, nch.width = 9.8, 26
-                nch.y_axis.title = f"{label} / {unit_of[label]}"
-                nch.x_axis.title = "时间"
-                nch.x_axis.delete = False
-                nch.y_axis.delete = False
-                nch.x_axis.axPos = "b"
-                nch.y_axis.axPos = "l"
-                nch.x_axis.tickLblPos = "low"
-                nch.y_axis.tickLblPos = "nextTo"
-                nch.x_axis.tickLblSkip = skip
-                nch.x_axis.tickMarkSkip = skip
-                nch.y_axis.majorGridlines = ChartLines()
-                cats = Reference(ws, min_col=tcol, min_row=2, max_row=max_row)
-                for idx in members:                 # 每系列单独引用, 兼容不连续列 (电源多路)
+            palette = ["2E75B6", "C00000", "548235",     # 电压蓝 电流红 功率绿
+                       "7030A0", "ED7D31", "00B0F0"]     # 电源多路时的扩展色
+            si = 0
+            for label in ("电压", "电流", "功率"):
+                for idx in [i for i, c in enumerate(cols) if label in c[0]]:
                     ref = Reference(ws, min_col=idx + 1, max_col=idx + 1,
-                                    min_row=1, max_row=max_row)
+                                    min_row=1, max_row=len(rows) + 1)
                     nch.add_data(ref, titles_from_data=True)
-                nch.set_categories(cats)
-                for s in nch.series:
+                    s = nch.series[-1]
                     s.smooth = False
-                    s.graphicalProperties.line.width = 16000  # ≈1.25pt
-                if len(members) == 1:
-                    nch.legend = None               # 单系列不需要图例
-                else:
-                    nch.legend.position = "b"
-                ch.add_chart(nch, anchors[gi])
-            note = ch.cell(row=66, column=2,
+                    s.graphicalProperties.line.width = 18000  # ≈1.4pt
+                    s.graphicalProperties.line.solidFill = palette[si % len(palette)]
+                    si += 1
+            nch.set_categories(cats)
+            if si == 1:
+                nch.legend = None
+            else:
+                nch.legend.position = "b"
+            ch.add_chart(nch, "B2")
+            note = ch.cell(row=26, column=2,
                            value="双击图表可在 Excel 中编辑；数据源为「数据」表。")
             note.font = Font(italic=True, color="808080")
 
