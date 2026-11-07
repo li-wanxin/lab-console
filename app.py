@@ -34,6 +34,7 @@ try:
     import openpyxl
     from openpyxl.chart import LineChart, Reference
     from openpyxl.chart.axis import ChartLines
+    from openpyxl.chart.layout import Layout, ManualLayout
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
     HAS_XLSX = True
@@ -1150,13 +1151,19 @@ class Bench:
             nch = LineChart()
             nch.title = "U / I / W 记录曲线"
             nch.style = 2
-            nch.height, nch.width = 11, 28
-            # 轴标注方案 (2026-11-07 用户截图二次反馈):
-            #   y 轴标题(即使短文本)竖排也会贴住轴数字 —— 干脆不用标题, 单位直接
-            #   写进刻度数字格式 (0.072 V/W / 0.996 A), 零重叠; 中文量纲字样保留在
-            #   图例系列名 (电压_V/功率_W/电流_A); x 轴刻度标签必须用 nextTo
-            #   (low 会把标签放到绘图区内侧, 与底部图例重叠)。
-            nch.y_axis.number_format = '0.000" V/W"'
+            nch.height, nch.width = 12, 28
+            # 布局方案 (2026-11-07 用户截图三次反馈):
+            #   渲染器对无布局信息的图表不自动让位 —— 图例与时间刻度叠字、
+            #   y 轴标题贴数字。改用 **显式 ManualLayout** 把画布划成四块:
+            #   标题(顶部自动) / 绘图区 0.12~0.78 / 时间标签 0.78~0.86 /
+            #   图例 0.86~0.95, 左右各留 0.12 给轴标题与数字。
+            #   y 轴标题恢复中文带单位 ("电压·功率 (V·W)" / "电流 (A)"),
+            #   刻度数字还原纯数值 (单位后缀方案用户不认可)。
+            nch.layout = Layout(manualLayout=ManualLayout(
+                xMode="edge", yMode="edge", layoutTarget="inner",
+                x=0.12, y=0.14, w=0.78, h=0.62))
+            nch.y_axis.title = "电压·功率 (V·W)"
+            nch.y_axis.number_format = "0.000"
             nch.y_axis.majorTickMark = "out"
             nch.x_axis.delete = False
             nch.y_axis.delete = False
@@ -1193,7 +1200,8 @@ class Bench:
             # 次图: 右轴 = 电流
             right = LineChart()
             right.y_axis.axId = 200
-            right.y_axis.number_format = '0.000" A"'
+            right.y_axis.title = "电流 (A)"
+            right.y_axis.number_format = "0.000"
             right.y_axis.majorTickMark = "out"
             right.y_axis.delete = False
             right.y_axis.axPos = "r"
@@ -1210,6 +1218,10 @@ class Bench:
                 nch.legend = None
             else:
                 nch.legend.position = "b"
+                # 图例固定在最底部一条, 与时间标签分区 (不依赖渲染器自动布局)
+                nch.legend.layout = Layout(manualLayout=ManualLayout(
+                    xMode="edge", yMode="edge",
+                    x=0.12, y=0.90, w=0.78, h=0.08))
             ch.add_chart(nch, "B2")
             note = ch.cell(row=26, column=2,
                            value="双击图表可在 Excel 中编辑；左轴=电压/功率，右轴=电流；数据源为「数据」表。")
