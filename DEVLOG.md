@@ -190,6 +190,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 傍晚（安装器图标补齐）**：用户反馈"安装后的软件图标没变"。排查：dist 便携版 exe 的 RT_ICON 资源确认为新示波器图标（多尺寸资源齐全）；setup.iss 缺 **SetupIconFile** —— Setup 安装器 exe 本身一直是 Inno 默认图标。已补 SetupIconFile=app.ico 并重编安装包。若用户指的是已安装程序的快捷方式图标：exe 内图标已是新的，属 **Windows 图标缓存**未刷新（刷新法：删除旧快捷方式重发 / ie4uinit -show / 重启 explorer）。安装位置未在常见路径找到（用户自定义目录）。
 
+- **2026-11-07 晚（v0.0.5 发布）**：APP_VERSION/setup.iss → 0.0.5；LabConsole-Portable.exe（20.2MB，新图标）+ LabConsole-Setup-v0.0.5.exe（22MB，SetupIconFile 生效）重编译；tag v0.0.5 推送并发布 Release。本版相对 v0.0.4：全新示波器风格应用图标（含 web favicon）、品牌更名 Lab Console（标题/副标题去型号化）、安装器自带应用图标、架构改造（MODELS 统一注册表/sysenv 跨平台层/recording 模块/ROLE_PANELS，新增 ARCHITECTURE.md/PORTING.md/build.sh）、便携版更名 LabConsole-Portable.exe + 更新形态判定改用 Inno 卸载器标记、修复真机连接回归（driver open 类方法绑定）。删除过时 ITECH测试台.spec。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

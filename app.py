@@ -51,7 +51,7 @@ CHART_POINTS = 360           # 界面曲线降采样上限（全量历史均匀�
 TABLE_POINTS = 200           # 数据表取最近这么多原始点
 
 # 程序版本（发布用, 与 setup.iss 的 MyAppVersion 保持一致）; 界面资源版本 v84
-APP_VERSION = "0.0.4"
+APP_VERSION = "0.0.5"
 # GitHub 发布仓库（启动时检查更新用）
 GITHUB_REPO = "li-wanxin/lab-console"
 
