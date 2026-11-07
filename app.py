@@ -666,9 +666,10 @@ class Bench:
         if is_setup:
             sysenv.open_external(dest)             # 安装向导接管, 覆盖安装
             self.log("ok", f"更新安装向导已启动 → {dest}")
-            # 安装器要覆盖本程序文件: 稍候自动退出释放 LabConsole.exe,
-            # 否则 Inno 可能卡在"关闭应用程序"一步 (WebView2 多进程关不干净)
-            threading.Timer(2.0, self._exit_for_setup).start()
+            # 安装器要覆盖本程序文件: 尽快自动退出释放 LabConsole.exe。
+            # 延迟必须短于安装器初始化+AppMutex 检查的耗时, 否则安装器会
+            # 弹"请先关闭程序"让用户去关一个已经自己退出的程序 (竞态)
+            threading.Timer(0.5, self._exit_for_setup).start()
             return {"mode": "setup", "path": str(dest),
                     "message": "安装向导已启动，本程序将自动关闭，"
                                "按提示完成覆盖安装后重新打开即可"}
