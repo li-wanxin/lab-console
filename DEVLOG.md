@@ -188,6 +188,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 下午（真机连接崩溃修复）**：用户真机连负载报 "LegacyTransportMixin() takes no arguments"。根因：重构时把 @classmethod 从 mixin 类"取下"再挂到驱动类（IT8510Legacy.open = LegacyTransportMixin.open），取下的 classmethod **仍绑定在 mixin 类上**，调用时 cls=mixin → 试图实例化 mixin → TypeError。模拟模式测不到该路径（走 entry["sim"]），真机一接即炸——**回归盲区**。修复：废弃 mixin 方案，open 类方法直接写在各驱动类内（IT6302/IT8511A/IT8510Legacy，APlus 继承），并留注释警示。无硬件验证法：① open.__self__ 断言绑定到驱动类本身；② 用不存在的端口调 open，应得 InstrumentError("打开串口…失败") 而非 TypeError——三型号全过。教训：**新增构造路径必须有不依赖硬件的冒烟（坏端口法）**，已可复用。便携版 14:37 重打包（用户关闭程序后成功替换），安装包 14:36 重编（含修复版 exe）。
 
+- **2026-11-07 傍晚（安装器图标补齐）**：用户反馈"安装后的软件图标没变"。排查：dist 便携版 exe 的 RT_ICON 资源确认为新示波器图标（多尺寸资源齐全）；setup.iss 缺 **SetupIconFile** —— Setup 安装器 exe 本身一直是 Inno 默认图标。已补 SetupIconFile=app.ico 并重编安装包。若用户指的是已安装程序的快捷方式图标：exe 内图标已是新的，属 **Windows 图标缓存**未刷新（刷新法：删除旧快捷方式重发 / ie4uinit -show / 重启 explorer）。安装位置未在常见路径找到（用户自定义目录）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

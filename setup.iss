@@ -9,6 +9,7 @@
 #define MyAppExeName "LabConsole.exe"
 
 [Setup]
+SetupIconFile=app.ico
 AppId={{8E5C4B7A-2F3D-4E86-9C1B-A7D3F5E9C1B0}
 AppName={#MyAppName} ({#MyAppNameZh})
 AppVersion={#MyAppVersion}
