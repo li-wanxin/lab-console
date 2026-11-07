@@ -57,7 +57,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 // 锁定, [InstallDelete] 遇占用可能弹错; DeleteFile 失败只返回 False, 静默跳过。
 procedure CleanTempInstallers;
 var
-  Temp, Path: String;
+  Temp: String;
   Masks: array[0..1] of String;
   Res: TFindRec;
   I: Integer;
