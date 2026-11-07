@@ -3,7 +3,7 @@
 
 #define MyAppName "Lab Console"
 #define MyAppNameZh "实验室仪器控制台"
-#define MyAppVersion "0.0.5"
+#define MyAppVersion "0.0.6"
 #define MyAppPublisher "li-wanxin"
 #define MyAppURL "https://github.com/li-wanxin/lab-console"
 #define MyAppExeName "LabConsole.exe"
@@ -34,9 +34,9 @@ AppMutex=LabConsoleAppMutex
 ; 程序已通过 AppMutex 保证先关闭, 跳过 Inno 的自动关闭应用阶段,
 ; 避免 pywebview 多进程 (WebView2) 导致该步骤卡住
 CloseApplications=no
-VersionInfoVersion=0.0.5.0
+VersionInfoVersion=0.0.6.0
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion=0.0.5.0
+VersionInfoProductVersion=0.0.6.0
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -50,6 +50,37 @@ Source: "DEVLOG.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntex
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Code]
+// 清理历次"应用内更新"下载到临时目录的旧安装包。
+// 用 [Code] 而非 [InstallDelete]: 正在运行的安装器自身匹配通配符、被 Windows
+// 锁定, [InstallDelete] 遇占用可能弹错; DeleteFile 失败只返回 False, 静默跳过。
+procedure CleanTempInstallers;
+var
+  Temp, Path: String;
+  Masks: array[0..1] of String;
+  Res: TFindRec;
+  I: Integer;
+begin
+  Temp := AddBackslash(GetEnv('TEMP'));
+  Masks[0] := Temp + 'LabConsole-Setup-*.exe';
+  Masks[1] := Temp + 'LabConsole-Portable*.exe';
+  for I := 0 to 1 do
+    if FindFirst(Masks[I], Res) then
+    try
+      repeat
+        DeleteFile(AddBackslash(Temp) + Res.Name);
+      until not FindNext(Res);
+    finally
+      FindClose(Res);
+    end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    CleanTempInstallers;
+end;
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
