@@ -1,4 +1,4 @@
-/* ITECH 测试台 —— 前端逻辑（多设备版）
+/* Lab Console —— 前端逻辑（多设备版）
    仪器清单支持任意台电源/负载并存：S.view = 设备id | 'sweep'
    每台设备一个视图 section（动态生成），sidebar 每台一个条目 */
 

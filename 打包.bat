@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-title 打包 ITECH 测试台
+title 打包 Lab Console
 
 echo [1/2] 安装打包依赖 ...
 python -m pip install --quiet pyinstaller pillow

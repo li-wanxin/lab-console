@@ -176,6 +176,10 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 上午（v0.0.4 发布）**：APP_VERSION/setup.iss 升 0.0.4，PyInstaller 便携版（20.2MB）+ ISCC 安装包（22MB）重编译，Release v0.0.4 发布。本版相对 v0.0.3 累积：记录导出 Excel 三页结构（概览/数据/曲线图）、图表多轮美化（双 Y 轴、ManualLayout 分区、固定三色、电源多路每路一图）、时间列宽、403 限流三层修复（ETag 条件请求 + 磁盘持久化 + releases.atom 降级）、手动检查更新入口（版本徽章点击）、import os 缺失修复。注意：手动检查更新时目标 exe 需关闭才能替换（Windows 占用限制）。
 
+- **2026-11-07 中午（新应用图标，提交 63a5f12）**：应用户要求换"电子仪器感"图标。tools/gen_icon_previews.py 用 Pillow 纯代码绘制 4 个候选（A 示波器 / B 数字面板 / C 表盘 / D 波形徽标，256px 实渲染预览供用户挑选），用户选 A。tools/make_app_icon.py 按同一逻辑 4x 超采样渲染 1024px → LANCZOS 出 7 尺寸 app.ico（256/128/64/48/32/24/16），同步生成 web/favicon.png 并在 index.html 加 <link rel="icon">。exe 图标经 PE .rsrc 校验（RT_ICON 存在）；便携版+安装包重打包，Release v0.0.4 附件已 --clobber 同步。旧图标备份 app_old.ico.bak。注意：桌面图标缓存可能需重启资源管理器才刷新显示。
+
+- **2026-11-07 下午（品牌更名 Lab Console）**：应用户要求，界面与打包元数据全面去掉"ITECH 测试台"称呼。改动：web/index.html（<title>、h1、logo 徽标 IT→LC）、desktop.py（pywebview 窗口标题 APP_TITLE 与文件头注释）、setup.iss（MyAppNameZh→"实验室仪器控制台"）、打包.bat/启动.bat 窗口标题、app.js/style.css 文件头注释。**exe 文件名保持不变**（dist/ITECH测试台.exe 与安装后的 LabConsole.exe）——更新逻辑按 exe 名区分安装版/便携版（startswith("labconsole")），改名会破坏 /api/update/download 分流。截图验收顶栏 LC + Lab Console + v0.0.4 正常。exe/安装包重打包，Release v0.0.4 附件同步覆盖（13:05 版）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

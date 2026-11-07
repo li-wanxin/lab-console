@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-ITECH 测试台 —— 桌面版入口
+Lab Console —— 桌面版入口
 ==========================
 用一个原生窗口（Windows WebView2）承载界面，双击即开，不经过浏览器。
 
     python desktop.py          # 直接从源码运行
-    ITECH测试台.exe            # 打包后的成品
+    dist/ITECH测试台.exe        # 打包后的成品 (显示名 Lab Console)
 
 界面与后端在本机回环地址通信（127.0.0.1，端口随机），外部无法访问。
 """
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import app as backend
 
-APP_TITLE = "ITECH 测试台 · IT6302 + IT8511A+"
+APP_TITLE = "Lab Console · IT6302 + IT8511A+"
 
 
 class Api:

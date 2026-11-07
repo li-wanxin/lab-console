@@ -2,7 +2,7 @@
 ; 编译: ISCC.exe setup.iss  ->  Output\LabConsole-Setup-v1.0.exe
 
 #define MyAppName "Lab Console"
-#define MyAppNameZh "ITECH测试台"
+#define MyAppNameZh "实验室仪器控制台"
 #define MyAppVersion "0.0.4"
 #define MyAppPublisher "li-wanxin"
 #define MyAppURL "https://github.com/li-wanxin/lab-console"

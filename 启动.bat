@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-title ITECH 测试台
+title Lab Console
 
 rem 首次运行自动补依赖
 python -c "import webview" >nul 2>nul
