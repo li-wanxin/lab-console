@@ -1151,15 +1151,20 @@ class Bench:
             nch.title = "U / I / W 记录曲线"
             nch.style = 2
             nch.height, nch.width = 11, 28
-            # 轴标题只用短单位 (V/W/A): 长中文竖排会与轴数字/刻度重叠 (2026-11-07 用户截图);
-            # 完整量纲名称在图例系列名里已有 (电压_V 等), x 轴标题删除以免与图例挤压
-            nch.y_axis.title = "V / W"
+            # 轴标注方案 (2026-11-07 用户截图二次反馈):
+            #   y 轴标题(即使短文本)竖排也会贴住轴数字 —— 干脆不用标题, 单位直接
+            #   写进刻度数字格式 (0.072 V/W / 0.996 A), 零重叠; 中文量纲字样保留在
+            #   图例系列名 (电压_V/功率_W/电流_A); x 轴刻度标签必须用 nextTo
+            #   (low 会把标签放到绘图区内侧, 与底部图例重叠)。
+            nch.y_axis.number_format = '0.000" V/W"'
+            nch.y_axis.majorTickMark = "out"
             nch.x_axis.delete = False
             nch.y_axis.delete = False
             nch.x_axis.axPos = "b"
             nch.y_axis.axPos = "l"
-            nch.x_axis.tickLblPos = "low"
+            nch.x_axis.tickLblPos = "nextTo"
             nch.y_axis.tickLblPos = "nextTo"
+            nch.x_axis.majorTickMark = "out"
             nch.x_axis.tickLblSkip = max(1, len(rows) // 10)
             nch.x_axis.tickMarkSkip = max(1, len(rows) // 10)
             nch.y_axis.majorGridlines = ChartLines()
@@ -1188,7 +1193,8 @@ class Bench:
             # 次图: 右轴 = 电流
             right = LineChart()
             right.y_axis.axId = 200
-            right.y_axis.title = "A"
+            right.y_axis.number_format = '0.000" A"'
+            right.y_axis.majorTickMark = "out"
             right.y_axis.delete = False
             right.y_axis.axPos = "r"
             right.y_axis.tickLblPos = "nextTo"
