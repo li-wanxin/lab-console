@@ -174,6 +174,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 上午（403 限流彻底修复：atom 降级 + 磁盘缓存，界面 v86）**：用户重启后手动检查仍 403——暴露上版两个漏洞：ETag 仅存内存（重启即丢，首查必全新请求），且用户网络走共享出口（系统代理），60 次/h 配额被共用。修复：① **ETag/上次结果持久化** %APPDATA%/LabConsole/update_cache.json，启动即恢复，重启后首查即 304 零消耗；② **releases.atom 降级通道**——API 403/429 时自动改走 github.com/.../releases.atom（订阅源不计 API 配额），解析最新 tag，assets 为空时 update_download 打开发布页引导手动下载（mode=manual，不再报错）；③ **顺手修掉隐藏 bug：app.py 缺 import os**（update_download 用 os.environ/os.startfile，真点"立即更新"会 NameError——从未被触发过）。前端 manualCheckUpdate 反馈优先级改为 available 优先于 error（atom 降级成功且有新版时正常弹窗）。单测：mock 403→atom 解析 tag v9.9.9 available=True、缓存保存/恢复 roundtrip；真机两次 check 成功+缓存落盘。dist exe 重打包（11:2x 版）。
 
+- **2026-11-07 上午（v0.0.4 发布）**：APP_VERSION/setup.iss 升 0.0.4，PyInstaller 便携版（20.2MB）+ ISCC 安装包（22MB）重编译，Release v0.0.4 发布。本版相对 v0.0.3 累积：记录导出 Excel 三页结构（概览/数据/曲线图）、图表多轮美化（双 Y 轴、ManualLayout 分区、固定三色、电源多路每路一图）、时间列宽、403 限流三层修复（ETag 条件请求 + 磁盘持久化 + releases.atom 降级）、手动检查更新入口（版本徽章点击）、import os 缺失修复。注意：手动检查更新时目标 exe 需关闭才能替换（Windows 占用限制）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
