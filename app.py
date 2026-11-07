@@ -17,6 +17,7 @@ import argparse
 import csv
 import io
 import json
+import os
 import sys
 import threading
 import time
@@ -154,6 +155,7 @@ class Bench:
         self.pending_exports: dict = {}              # 已结束待导出: id -> rec
         self.update_info: dict = {"available": False}
         self._update_etag: str = ""                  # GitHub ETag: 条件请求 304 不消耗 API 配额
+        self._update_cache_load()                    # 磁盘缓存: 重启不丢 ETag/上次结果, 首查即 304
         self._rec_seq = 0
         self.sweep = {
             "running": False,
@@ -479,6 +481,58 @@ class Bench:
             return self.snapshot()
 
     # ---------------- 更新检查 ----------------
+    _UPDATE_CACHE = "update_cache.json"          # APPDATA/LabConsole/ 下
+
+    def _update_cache_path(self) -> Path:
+        base = os.environ.get("APPDATA") or str(Path.home())
+        return Path(base) / "LabConsole" / self._UPDATE_CACHE
+
+    def _update_cache_load(self) -> None:
+        """启动时恢复上次 ETag 与检查结果: 重启后的首次检查即可走 304 缓存。"""
+        try:
+            data = json.loads(self._update_cache_path().read_text("utf-8"))
+            self.update_info = dict(data.get("info") or {"available": False})
+            self._update_etag = str(data.get("etag") or "")
+        except (OSError, ValueError):
+            pass
+
+    def _update_cache_save(self) -> None:
+        try:
+            p = self._update_cache_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps({"etag": self._update_etag,
+                                     "info": self.update_info}, ensure_ascii=False), "utf-8")
+        except OSError:
+            pass
+
+    def _check_via_atom(self) -> dict | None:
+        """降级通道: releases.atom 订阅源不走 API 配额 (API 403 时用)。
+
+        atom 只含 tag 名与发布链接, 不含附件清单 —— assets 为空时
+        update_download 会引导用户到发布页手动下载。
+        """
+        try:
+            import re as _re
+            url = f"https://github.com/{GITHUB_REPO}/releases.atom"
+            req = _urlreq.Request(url, headers={"User-Agent": f"LabConsole/{APP_VERSION}"})
+            with _urlreq.urlopen(req, timeout=8) as resp:
+                text = resp.read(1 << 20).decode("utf-8", "replace")
+            m = _re.search(r'href="[^"]*/releases/tag/([^"]+)"', text)
+            if not m:
+                return None
+            tag = m.group(1).split("/")[-1].lstrip("vV")
+            try:
+                newer = tuple(int(x) for x in tag.split(".")) > \
+                        tuple(int(x) for x in APP_VERSION.split("."))
+            except ValueError:
+                newer = tag != APP_VERSION
+            return {"latest": tag, "available": newer, "assets": [],
+                    "html_url": f"https://github.com/{GITHUB_REPO}/releases/latest",
+                    "checked_at": time.time(),
+                    "note": "经由订阅源检查（API 限流降级），安装包请到发布页下载"}
+        except (URLError, OSError, ValueError):
+            return None
+
     def _check_update_delayed(self) -> None:
         time.sleep(3.0)
         self._check_update_once()
@@ -513,14 +567,24 @@ class Bench:
                     prev.pop("error", None)          # 限流错误随缓存一并清除
                     with self.lock:
                         self.update_info = prev
+                    self._update_cache_save()
                     return
                 if he.code in (403, 429):
-                    msg = ("GitHub API 限流（403 rate limit exceeded）——匿名接口每 IP 每小时 60 次。"
-                           "程序已改用缓存请求避免此问题，请几分钟后再试；"
-                           "也可直接到发布页下载：https://github.com/" + GITHUB_REPO + "/releases/latest")
+                    # API 配额耗尽 → 降级走 atom 订阅源 (不计配额)
+                    alt = self._check_via_atom()
+                    if alt:
+                        alt["error"] = ("GitHub API 限流，已自动改用订阅源检查"
+                                        "（安装包请到发布页下载）")
+                        self.log("warn", "GitHub API 限流 (403)，已降级经 releases.atom 检查")
+                        with self.lock:
+                            self.update_info = alt
+                        self._update_cache_save()
+                        return
                     info = dict(prev) if prev.get("latest") else info
                     info["checked_at"] = time.time()
-                    info["error"] = msg
+                    info["error"] = ("GitHub API 限流（403 rate limit exceeded）——匿名接口每 IP 每小时 60 次。"
+                                     "请几分钟后再试；也可直接到发布页下载："
+                                     "https://github.com/" + GITHUB_REPO + "/releases/latest")
                     self.log("warn", "检查更新被 GitHub 限流 (403)，请稍后再试")
                     with self.lock:
                         self.update_info = info
@@ -545,6 +609,7 @@ class Bench:
             with self.lock:
                 self._update_etag = new_etag or etag
                 self.update_info = info
+            self._update_cache_save()
         except (URLError, OSError, ValueError, KeyError) as exc:
             info["error"] = str(exc)[:200]        # 无网络/代理不通: 静默
             with self.lock:
@@ -573,7 +638,14 @@ class Bench:
         want = "LabConsole-Setup" if is_setup else "LabConsole-Portable"
         asset = next((a for a in assets if a["name"].startswith(want)), None)
         if asset is None:
-            raise InstrumentError(f"发布页未找到 {want} 安装包，请到发布页手动下载")
+            # atom 降级路径没有附件清单: 打开发布页引导手动下载
+            import webbrowser
+            url = info.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases/latest"
+            webbrowser.open(url)
+            self.log("info", f"发现新版本 v{info.get('latest')}，已打开发布页，请手动下载 {want} 安装包")
+            return {"mode": "manual", "url": url,
+                    "message": f"新版本 v{info.get('latest')} 的安装包请在新打开的发布页下载"
+                               f"（{want}），下载后运行即可"}
 
         dest = Path(os.environ.get("TEMP", str(Path.home()))) / asset["name"]
         self.log("info", f"开始下载更新: {asset['name']} ({asset['size'] // 1024 // 1024} MB)")

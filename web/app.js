@@ -1666,10 +1666,10 @@ async function manualCheckUpdate() {
   try {
     const up = await api('/api/update/check', {});
     if (STATUS) STATUS.update = up;
-    if (up.error) {
-      toast('检查更新失败：无法访问 GitHub（检查网络或代理）', true);
-    } else if (up.available) {
+    if (up.available) {
       maybeShowUpdateDialog(up, true);        // 手动检查: 即使此前忽略过也弹
+    } else if (up.error) {
+      toast(up.error, true);
     } else if (up.latest) {
       toast(`当前已是最新版本 v${STATUS.app_version}（GitHub 最新 v${up.latest}）`);
     } else {

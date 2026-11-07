@@ -172,6 +172,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 上午（更新检查 403 限流修复）**：用户手动检查更新报 "HTTP Error 403: rate limit exceeded"。根因：GitHub 匿名 API 每 IP 每小时仅 60 次（共享出口网络/反复点检极易耗尽）。修复 _check_update_once：① **ETag 条件请求**——首次成功记住响应 ETag，之后带 If-None-Match，GitHub 对 304 响应**不计数**，检查基本不再消耗配额（官方特性）；② **403/429 分支**——中文提示限流原因+发布页直链，且**保留上次成功结果**（latest/available 不丢，error 字段仅作提示）；③ 304 时清掉历史 error 并刷新 checked_at。单测验证：200→ETag→304 缓存路径 latest 保留；mock 403 → 友好提示+结果保留。dist exe 重打包。
 
+- **2026-11-07 上午（403 限流彻底修复：atom 降级 + 磁盘缓存，界面 v86）**：用户重启后手动检查仍 403——暴露上版两个漏洞：ETag 仅存内存（重启即丢，首查必全新请求），且用户网络走共享出口（系统代理），60 次/h 配额被共用。修复：① **ETag/上次结果持久化** %APPDATA%/LabConsole/update_cache.json，启动即恢复，重启后首查即 304 零消耗；② **releases.atom 降级通道**——API 403/429 时自动改走 github.com/.../releases.atom（订阅源不计 API 配额），解析最新 tag，assets 为空时 update_download 打开发布页引导手动下载（mode=manual，不再报错）；③ **顺手修掉隐藏 bug：app.py 缺 import os**（update_download 用 os.environ/os.startfile，真点"立即更新"会 NameError——从未被触发过）。前端 manualCheckUpdate 反馈优先级改为 available 优先于 error（atom 降级成功且有新版时正常弹窗）。单测：mock 403→atom 解析 tag v9.9.9 available=True、缓存保存/恢复 roundtrip；真机两次 check 成功+缓存落盘。dist exe 重打包（11:2x 版）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
