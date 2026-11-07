@@ -148,6 +148,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 上午（曲线图合并单图）**：应用户反馈"三张图颜色繁多、要合并成一张"。IT8511A+ 三量纲数值范围同为 0~150（V/A/W），共轴可读——「曲线图」页改回**单张图**：三条曲线固定三色（电压蓝 2E75B6 / 电流红 C00000 / 功率绿 548235，电源多路时扩展调色板循环），Y 轴标题"数值 (V / A / W)"，图例底部，单系列无图例，线宽 1.4pt。轴属性修正保持（axPos/tickLblPos/delete/时间文本辅助列）。用用户真实数据（377 点）重导验证：1 图 3 系列固定色、引用列 B/C/D+G，产出桌面 ..._单图三色.xlsx。dist exe 重打包（09:4x 版，含本轮全部图表修复）。
 
+- **2026-11-07 上午（双 Y 轴曲线）**：应用户要求改左右双数轴。「曲线图」单图改为**双轴组**：主 lineChart 组（电压蓝 2E75B6 + 功率绿 548235）→ 左轴"电压 / V · 功率 / W"（crosses=autoZero，带网格线）；次 lineChart 组（电流红 C00000）→ 右轴"电流 / A"（axId=200、crosses=max、majorGridlines=None 防两套网格交叉）。两 lineChart 组共享 catAx（axId=10）。openpyxl 用 `主图 += 次图` 合并，次图只需 y_axis.axId=200 + crosses=max。XML 核验：2 组/2 valAx/1 catAx/axId 10+100+200/三色固定/引用列 B/C/D+G，全部正确。产出桌面 ..._双轴.xlsx 供用户确认。dist exe 重打包（09:5x 版）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
