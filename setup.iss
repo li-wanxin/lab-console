@@ -3,7 +3,7 @@
 
 #define MyAppName "Lab Console"
 #define MyAppNameZh "实验室仪器控制台"
-#define MyAppVersion "0.0.6"
+#define MyAppVersion "0.0.7"
 #define MyAppPublisher "li-wanxin"
 #define MyAppURL "https://github.com/li-wanxin/lab-console"
 #define MyAppExeName "LabConsole.exe"
@@ -34,9 +34,9 @@ AppMutex=LabConsoleAppMutex
 ; 程序已通过 AppMutex 保证先关闭, 跳过 Inno 的自动关闭应用阶段,
 ; 避免 pywebview 多进程 (WebView2) 导致该步骤卡住
 CloseApplications=no
-VersionInfoVersion=0.0.6.0
+VersionInfoVersion=0.0.7.0
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion=0.0.6.0
+VersionInfoProductVersion=0.0.7.0
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
