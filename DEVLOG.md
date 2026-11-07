@@ -152,6 +152,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 上午（双 Y 轴曲线）**：应用户要求改左右双数轴。「曲线图」单图改为**双轴组**：主 lineChart 组（电压蓝 2E75B6 + 功率绿 548235）→ 左轴"电压 / V · 功率 / W"（crosses=autoZero，带网格线）；次 lineChart 组（电流红 C00000）→ 右轴"电流 / A"（axId=200、crosses=max、majorGridlines=None 防两套网格交叉）。两 lineChart 组共享 catAx（axId=10）。openpyxl 用 `主图 += 次图` 合并，次图只需 y_axis.axId=200 + crosses=max。XML 核验：2 组/2 valAx/1 catAx/axId 10+100+200/三色固定/引用列 B/C/D+G，全部正确。产出桌面 ..._双轴.xlsx 供用户确认。dist exe 重打包（09:5x 版）。
 
+- **2026-11-07 上午（轴标题重叠美化）**：用户截图反馈轴标题与轴数字/刻度重叠。原因：左轴长中文标题"电压 / V · 功率 / W"竖排超高挤压绘图区，x 轴标题"时间"与底部图例/时间刻度三方挤压。修复：轴标题只留短单位（左"V / W"、右"A"），删除 x 轴标题"时间"（时间刻度自明）；完整量纲中文名在图例系列名（电压_V/功率_W/电流_A）里保留。XML 核验图表文字仅剩 [标题, V/W, A]。dist exe 重打包（10:0x 版）。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

@@ -1151,8 +1151,9 @@ class Bench:
             nch.title = "U / I / W 记录曲线"
             nch.style = 2
             nch.height, nch.width = 11, 28
-            nch.y_axis.title = "电压 / V · 功率 / W"
-            nch.x_axis.title = "时间"
+            # 轴标题只用短单位 (V/W/A): 长中文竖排会与轴数字/刻度重叠 (2026-11-07 用户截图);
+            # 完整量纲名称在图例系列名里已有 (电压_V 等), x 轴标题删除以免与图例挤压
+            nch.y_axis.title = "V / W"
             nch.x_axis.delete = False
             nch.y_axis.delete = False
             nch.x_axis.axPos = "b"
@@ -1187,7 +1188,7 @@ class Bench:
             # 次图: 右轴 = 电流
             right = LineChart()
             right.y_axis.axId = 200
-            right.y_axis.title = "电流 / A"
+            right.y_axis.title = "A"
             right.y_axis.delete = False
             right.y_axis.axPos = "r"
             right.y_axis.tickLblPos = "nextTo"
