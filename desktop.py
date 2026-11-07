@@ -21,7 +21,7 @@ from pathlib import Path
 
 import app as backend
 
-APP_TITLE = "Lab Console · IT6302 + IT8511A+"
+APP_TITLE = "Lab Console"
 
 
 class Api:

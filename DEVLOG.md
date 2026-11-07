@@ -180,6 +180,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 下午（品牌更名 Lab Console）**：应用户要求，界面与打包元数据全面去掉"ITECH 测试台"称呼。改动：web/index.html（<title>、h1、logo 徽标 IT→LC）、desktop.py（pywebview 窗口标题 APP_TITLE 与文件头注释）、setup.iss（MyAppNameZh→"实验室仪器控制台"）、打包.bat/启动.bat 窗口标题、app.js/style.css 文件头注释。**exe 文件名保持不变**（dist/ITECH测试台.exe 与安装后的 LabConsole.exe）——更新逻辑按 exe 名区分安装版/便携版（startswith("labconsole")），改名会破坏 /api/update/download 分流。截图验收顶栏 LC + Lab Console + v0.0.4 正常。exe/安装包重打包，Release v0.0.4 附件同步覆盖（13:05 版）。
 
+- **2026-11-07 下午（去型号化，应用户反馈）**：窗口标题（desktop.py APP_TITLE→"Lab Console"）与网页 <title>/副标题（index.html→"实验室仪器控制台"）不再携带 IT6302/IT8511A+ 型号字样——后期支持更多型号时无需改品牌区。仪器型号仍显示在设备卡片（IT6302/IT8511A+ 徽标）与面板标题处，属动态信息。exe/安装包重打包（13:09 版），Release v0.0.4 附件已覆盖。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。
