@@ -514,6 +514,12 @@ class Bench:
         with self.lock:
             self.update_info = info
 
+    def update_check(self) -> dict:
+        """手动检查更新: 同步查询 GitHub 并返回最新结果 (供界面按钮调用)。"""
+        self._check_update_once()
+        with self.lock:
+            return dict(self.update_info or {})
+
     def update_download(self) -> dict:
         """下载最新版并按运行形态处理: 便携版就位替换; 安装版启动安装向导。"""
         with self.lock:
@@ -1446,6 +1452,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(BENCH.record_discard(body["id"]))
             if path == "/api/update/download":
                 return self._json(BENCH.update_download())
+            if path == "/api/update/check":
+                return self._json(BENCH.update_check())
             if path == "/api/fs/mkdir":
                 target = Path(body.get("path", ""))
                 if not str(target).strip():

@@ -168,6 +168,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 上午（电源图表 + 多路分图）**：用户反馈"电源导出的图没修复"——根因：他运行的**安装版 v0.0.3 是 11-05 打包**，不含 11-07 的全部图表美化（便携版 exe 是新的、安装包是旧的）。已重编译 Output/LabConsole-Setup-v0.0.3.exe（覆盖为最新代码）。功能改进：图表段重构为 `_build_dual_chart(title, prefix)` 通用函数——**电源多路记录时每个逻辑输出单独一张双轴图**（CH1 图只引用 CH1 的 U/I/W 列，CH2 图只引用 CH2 的，前缀匹配防串图），负载仍为一张总图；每图独立 ManualLayout 分区 + 双轴 + 固定三色。模拟电源双路导出验证：2 图、各 3 系列、引用列正确分离、布局齐全。dist exe 重打包（10:4x 版）。
 
+- **2026-11-07 上午（手动检查更新入口，界面 v85）**：应用户要求增加随时可触发的版本检查。后端新增 POST /api/update/check（Bench.update_check：同步调 _check_update_once 后返回最新 update_info，请求线程内执行、8s 超时）。前端：顶栏版本徽章 #app-ver 变为可点击入口（hover 高亮 --accent、title"程序版本（点击检查更新）"），点击→徽章显示"检测中…"（manualCheckBusy 防重入、render 加守卫防 tick 覆盖）→ 结果反馈：有新版弹更新对话框（maybeShowUpdateDialog 加 force 参数，手动检查无视"忽略此版本"记录）、无新版 toast"当前已是最新版本 vX（GitHub 最新 vY）"、网络失败 toast 报错。真实验证：/api/update/check 查到 latest=0.0.3 available=False assets 两项；截图确认 toast 与徽章恢复。dist exe 重打包。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

@@ -1582,7 +1582,7 @@ function render(st) {
   STATUS = st;
   S.ports = st.ports || [];
   const verEl = $('#app-ver');
-  if (verEl && st.app_version) verEl.textContent = 'v' + st.app_version;
+  if (verEl && st.app_version && !manualCheckBusy) verEl.textContent = 'v' + st.app_version;
   maybeShowUpdateDialog(st.update);
   ensurePanels(st);
   if (!S.booted) {
@@ -1605,13 +1605,15 @@ function render(st) {
 let updateCtx = null;      // 当次弹窗对应的 update 状态
 let updateBusy = false;
 
-function maybeShowUpdateDialog(up) {
+function maybeShowUpdateDialog(up, force) {
   if (!up || !up.available || updateBusy) return;
   const mask = $('#update-mask');
   if (mask.style.display === 'flex') return;
-  let ignored = null;
-  try { ignored = localStorage.getItem('itech.update.ignore'); } catch (e) { /* 忽略 */ }
-  if (ignored === up.latest) return;          // 用户已忽略此版本
+  if (!force) {
+    let ignored = null;
+    try { ignored = localStorage.getItem('itech.update.ignore'); } catch (e) { /* 忽略 */ }
+    if (ignored === up.latest) return;        // 用户已忽略此版本
+  }
   if (updateCtx && updateCtx.latest === up.latest) return;
   updateCtx = up;
   $('#update-body').innerHTML =
@@ -1651,6 +1653,34 @@ function skipUpdate() {
     try { localStorage.setItem('itech.update.ignore', updateCtx.latest); } catch (e) { /* 忽略 */ }
   }
   closeUpdateDialog();
+}
+
+/* 手动检查更新: 点击顶栏版本徽章触发, 结果即时反馈 */
+let manualCheckBusy = false;
+async function manualCheckUpdate() {
+  if (manualCheckBusy) return;
+  const verEl = $('#app-ver');
+  manualCheckBusy = true;
+  const old = verEl ? verEl.textContent : '';
+  if (verEl) verEl.textContent = '检测中…';
+  try {
+    const up = await api('/api/update/check', {});
+    if (STATUS) STATUS.update = up;
+    if (up.error) {
+      toast('检查更新失败：无法访问 GitHub（检查网络或代理）', true);
+    } else if (up.available) {
+      maybeShowUpdateDialog(up, true);        // 手动检查: 即使此前忽略过也弹
+    } else if (up.latest) {
+      toast(`当前已是最新版本 v${STATUS.app_version}（GitHub 最新 v${up.latest}）`);
+    } else {
+      toast(`当前已是最新版本 v${STATUS.app_version}`);
+    }
+  } catch (e) {
+    toast('检查更新失败：' + e.message, true);
+  } finally {
+    manualCheckBusy = false;
+    if (verEl) verEl.textContent = old;
+  }
 }
 
 async function tick() {
@@ -2450,6 +2480,7 @@ function bind() {
     if (u && u.html_url) window.open(u.html_url, '_blank');
   };
   $('#update-ok').onclick = confirmUpdate;
+  $('#app-ver').onclick = manualCheckUpdate;
   $('#rec-browse').onclick = async () => {
     const bridge = window.pywebview && window.pywebview.api;
     if (bridge && bridge.pick_dir) {
