@@ -3,7 +3,7 @@
 
 #define MyAppName "Lab Console"
 #define MyAppNameZh "实验室仪器控制台"
-#define MyAppVersion "0.0.7"
+#define MyAppVersion "0.0.8"
 #define MyAppPublisher "li-wanxin"
 #define MyAppURL "https://github.com/li-wanxin/lab-console"
 #define MyAppExeName "LabConsole.exe"
@@ -34,15 +34,18 @@ AppMutex=LabConsoleAppMutex
 ; 程序已通过 AppMutex 保证先关闭, 跳过 Inno 的自动关闭应用阶段,
 ; 避免 pywebview 多进程 (WebView2) 导致该步骤卡住
 CloseApplications=no
-VersionInfoVersion=0.0.7.0
+VersionInfoVersion=0.0.8.0
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion=0.0.7.0
+VersionInfoProductVersion=0.0.8.0
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\LabConsole-Portable.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+; 安装版采用目录式打包 (onedir): 运行时直接从安装目录加载 DLL,
+; 不再每次启动解压到 %TEMP%, 根治杀软首扫竞态导致的
+; "Failed to load Python DLL ... 找不到指定的模块" 偶发错误
+Source: "dist\LabConsole\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "DEVLOG.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
