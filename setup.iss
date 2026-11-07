@@ -28,6 +28,12 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
+; 安装/卸载前检测程序是否在运行 (互斥量由 desktop.py 创建):
+; 在安装开始时就提示用户先关闭, 而不是装到一半卡在"关闭应用程序"
+AppMutex=LabConsoleAppMutex
+; 程序已通过 AppMutex 保证先关闭, 跳过 Inno 的自动关闭应用阶段,
+; 避免 pywebview 多进程 (WebView2) 导致该步骤卡住
+CloseApplications=no
 VersionInfoVersion=0.0.5.0
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion=0.0.5.0

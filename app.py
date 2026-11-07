@@ -465,12 +465,28 @@ class Bench:
     def _update_cache_path(self) -> Path:
         return sysenv.app_data_dir() / self._UPDATE_CACHE
 
+    def _recompute_available(self, info: dict) -> None:
+        """按当前 APP_VERSION 重算 available。
+
+        磁盘缓存的结果可能是旧版本时代算出的（如从 v0.0.4 升到 v0.0.5 后
+        Release 未变、304 命中旧缓存），available 必须以当前版本重新比较。
+        """
+        tag = str(info.get("latest") or "")
+        if not tag:
+            return
+        try:
+            info["available"] = tuple(int(x) for x in tag.split(".")) > \
+                                tuple(int(x) for x in APP_VERSION.split("."))
+        except ValueError:
+            info["available"] = tag != APP_VERSION
+
     def _update_cache_load(self) -> None:
         """启动时恢复上次 ETag 与检查结果: 重启后的首次检查即可走 304 缓存。"""
         try:
             data = json.loads(self._update_cache_path().read_text("utf-8"))
             self.update_info = dict(data.get("info") or {"available": False})
             self._update_etag = str(data.get("etag") or "")
+            self._recompute_available(self.update_info)
         except (OSError, ValueError):
             pass
 
@@ -543,6 +559,7 @@ class Bench:
                 if he.code == 304 and prev.get("latest"):
                     prev["checked_at"] = time.time()
                     prev.pop("error", None)          # 限流错误随缓存一并清除
+                    self._recompute_available(prev)  # 缓存可能出自旧版本时代
                     with self.lock:
                         self.update_info = prev
                     self._update_cache_save()
@@ -559,6 +576,7 @@ class Bench:
                         self._update_cache_save()
                         return
                     info = dict(prev) if prev.get("latest") else info
+                    self._recompute_available(info)  # 缓存可能出自旧版本时代
                     info["checked_at"] = time.time()
                     info["error"] = ("GitHub API 限流（403 rate limit exceeded）——匿名接口每 IP 每小时 60 次。"
                                      "请几分钟后再试；也可直接到发布页下载："
@@ -648,8 +666,20 @@ class Bench:
         if is_setup:
             sysenv.open_external(dest)             # 安装向导接管, 覆盖安装
             self.log("ok", f"更新安装向导已启动 → {dest}")
+            # 安装器要覆盖本程序文件: 稍候自动退出释放 LabConsole.exe,
+            # 否则 Inno 可能卡在"关闭应用程序"一步 (WebView2 多进程关不干净)
+            threading.Timer(2.0, self._exit_for_setup).start()
             return {"mode": "setup", "path": str(dest),
-                    "message": "安装向导已启动，按提示完成覆盖安装后重新打开程序即可"}
+                    "message": "安装向导已启动，本程序将自动关闭，"
+                               "按提示完成覆盖安装后重新打开即可"}
+
+    def _exit_for_setup(self) -> None:
+        """应用内更新: 启动安装向导后关断仪器输出并退出进程。"""
+        try:
+            shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(0)
 
         # 便携版: 运行中的 exe 允许改名（不允许覆盖），三步就位替换
         new = exe.with_name(exe.stem + "_更新下载.exe")

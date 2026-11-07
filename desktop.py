@@ -23,6 +23,23 @@ import app as backend
 
 APP_TITLE = "Lab Console"
 
+# 与 setup.iss 的 AppMutex 一致: 安装器据此在开始安装前检测程序是否在运行
+MUTEX_NAME = "LabConsoleAppMutex"
+_MUTEX_HANDLE = None  # 持有引用防止 GC 释放互斥量
+
+
+def _acquire_mutex() -> None:
+    """Windows 下创建命名互斥量, 供 Inno 安装器 AppMutex 检测程序是否运行。"""
+    global _MUTEX_HANDLE
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        _MUTEX_HANDLE = ctypes.windll.kernel32.CreateMutexW(
+            None, False, MUTEX_NAME)
+    except Exception:  # noqa: BLE001
+        _MUTEX_HANDLE = None
+
 
 class Api:
     """暴露给前端的原生能力（另存为对话框等）。"""
@@ -135,6 +152,7 @@ def main() -> None:
         except Exception:  # noqa: BLE001
             pass
 
+    _acquire_mutex()
     _thread, url = _start_server()
 
     try:
@@ -180,6 +198,10 @@ def main() -> None:
     finally:
         backend.shutdown()
         print("已退出，仪器输出已关闭")
+        # 强制结束进程: 不给残留线程/WebView2 子进程拖住退出的机会,
+        # 避免覆盖安装时 Inno 卡在"关闭应用程序"
+        import os
+        os._exit(0)
 
 
 if __name__ == "__main__":
