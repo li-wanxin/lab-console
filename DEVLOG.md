@@ -182,6 +182,8 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 - **2026-11-07 下午（去型号化，应用户反馈）**：窗口标题（desktop.py APP_TITLE→"Lab Console"）与网页 <title>/副标题（index.html→"实验室仪器控制台"）不再携带 IT6302/IT8511A+ 型号字样——后期支持更多型号时无需改品牌区。仪器型号仍显示在设备卡片（IT6302/IT8511A+ 徽标）与面板标题处，属动态信息。exe/安装包重打包（13:09 版），Release v0.0.4 附件已覆盖。
 
+- **2026-11-07 下午（架构改造：多仪器扩展 + Mac 移植准备）**：复查后四项结构性改动（**不改版本号/不动 Release**，纯内部重构，行为完全兼容，模拟端到端回归通过）：① **sysenv.py**——跨平台差异层（app_data_dir 三平台/open_external/list_roots/documents_dir），os.startfile、%APPDATA%、盘符枚举全部收编，Mac 移植只改此文件；② **instruments.py 统一注册表**——原 4 张分散表（LOAD_MODEL_SPECS/LOAD_DRIVERS/POWER_MODEL_SPECS/MODEL_CATALOG）合并为单一 `MODELS[role][model]`（driver/sim/label/channels/baud/ranges），派生视图保留兼容；驱动统一 `open(port,baud)` 构造入口（ScpiTransportMixin/LegacyTransportMixin），Bench.connect 消灭 LEGACY_SERIAL 分支——**新增型号=注册表加一个条目**；③ **recording.py**——xlsx 导出（列定义/统计/双轴图表/经验注释）整体拆出（app.py 69KB→57KB），rec_columns 支持新角色加分支；④ **前端 ROLE_PANELS 注册表**——面板 html/render/curves 三件套按角色注册，分发逻辑不再 if/else。新增 ARCHITECTURE.md（扩展指南）与 PORTING.md（Mac 移植清单）+ build.sh（macOS/Linux 构建，--onedir .app 形态）。回归：注册表/统一构造/模拟联动/负载记录导出三页/电源双路分图全部 PASS，UI 截图无异常。坑：MODELS 引用后置定义的模拟器类，注册表须置于文件末尾。
+
 ## 六、当前状态（v80）
 
 - dev 分支已推送远程（最新 0683d30）。本地目录 `D:/easyCode/lab-console`（原 itech-bench，仓库直接克隆到新目录）。

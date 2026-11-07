@@ -1071,6 +1071,13 @@ function loadPanelHtml(d) {
 }
 
 let panelStamp = '';
+/* 角色→面板注册表: 新增仪器角色时在此注册 {html, render, curves}
+   三件套即可接入界面 (面板 DOM / 实时刷新 / 曲线绘制), 不用改分发逻辑 */
+const ROLE_PANELS = {
+  power: { html: powerPanelHtml, render: renderPowerPanel, curves: renderPowerCurves },
+  load:  { html: loadPanelHtml,  render: renderLoadPanel,  curves: renderLoadCurves },
+};
+
 function ensurePanels(st) {
   const stamp = st.devices.map(d => `${d.id}:${d.model}:${d.role}`).join('|');
   if (panelStamp === stamp) return;
@@ -1082,11 +1089,12 @@ function ensurePanels(st) {
   st.devices.forEach(d => {
     let sec = $('#view-' + d.id);
     if (!sec) {
+      const spec = ROLE_PANELS[d.role];
       sec = document.createElement('section');
       sec.className = 'view';
       sec.dataset.view = d.id;
       sec.id = 'view-' + d.id;
-      sec.innerHTML = `<div class="panel vpanel">${d.role === 'power' ? powerPanelHtml(d) : loadPanelHtml(d)}</div>`;
+      sec.innerHTML = `<div class="panel vpanel">${spec ? spec.html(d) : ''}</div>`;
       $('main').appendChild(sec);
     } else {
       const tag = $('.view-head .model', sec);
@@ -1241,8 +1249,8 @@ function syncLoadPanelMode(sec, d, send) {
 function renderCurves(st) {
   const dev = curDev();
   if (!dev) return;
-  if (dev.role === 'power') renderPowerCurves(st);
-  else renderLoadCurves(st);
+  const spec = ROLE_PANELS[dev.role];
+  if (spec) spec.curves(st);
 }
 
 /* 原始数据表取样：最新在上，行间隔 >=0.75s，最多 n 行 */
@@ -1591,8 +1599,8 @@ function render(st) {
   }
   renderNav(st);
   st.devices.forEach(d => {
-    if (d.role === 'power') renderPowerPanel(st, d);
-    else renderLoadPanel(st, d);
+    const spec = ROLE_PANELS[d.role];
+    if (spec) spec.render(st, d);
   });
   renderCurves(st);
   renderLogs(st);

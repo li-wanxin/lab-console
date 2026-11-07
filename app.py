@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-ITECH 台式电源 / 电子负载 上位机
+Lab Console —— 实验室仪器控制台
 ================================
-IT6302 三路直流电源 + IT8511A+ 电子负载
+IT6302 三路直流电源 + IT8511A+ 电子负载 (驱动层支持按型号扩展)
 
 用法:
     python app.py                 # 启动并自动打开浏览器 (http://127.0.0.1:8765)
@@ -24,36 +24,18 @@ import time
 import traceback
 import webbrowser
 from collections import deque
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import request as _urlreq
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlparse
 
-try:
-    import openpyxl
-    from openpyxl.chart import LineChart, Reference
-    from openpyxl.chart.axis import ChartLines
-    from openpyxl.chart.layout import Layout, ManualLayout
-    from openpyxl.styles import Alignment, Font, PatternFill
-    from openpyxl.utils import get_column_letter
-    HAS_XLSX = True
-except ImportError:                                    # 未装 openpyxl 时记录功能降级提示
-    HAS_XLSX = False
-
+import recording
+import sysenv
 from instruments import (
     HAS_SERIAL,
-    IT6302,
-    IT8511A,
-    LOAD_DRIVERS,
-    LOAD_MODEL_SPECS,
-    MODEL_CATALOG,
-    POWER_MODEL_SPECS,
+    MODELS,
     InstrumentError,
-    SerialTransport,
-    SimLoad,
-    SimPower,
     list_serial_ports,
 )
 
@@ -77,9 +59,7 @@ GITHUB_REPO = "li-wanxin/lab-console"
 def list_dirs(p: str) -> dict:
     """目录选择器用：列出 p 的子目录；p 为空时列盘符。仅本机监听，无注入面。"""
     if not p:
-        drives = [f"{c}:\\" for c in "CDEFGHIJKLMNOPQRSTUVWXYZ"
-                  if Path(f"{c}:\\").exists()]
-        return {"path": "", "parent": None, "dirs": drives}
+        return {"path": "", "parent": None, "dirs": sysenv.list_roots()}
     base = Path(p)
     if not base.exists():
         raise FileNotFoundError(f"路径不存在: {base}")
@@ -123,7 +103,8 @@ class Dev:
             self.state = None
         else:
             self.channels = None
-            self.range = dict(LOAD_MODEL_SPECS.get(model) or LOAD_MODEL_SPECS["IT8511A+"])
+            spec = MODELS["load"].get(model) or MODELS["load"]["IT8511A+"]
+            self.range = dict(spec["ranges"])
             self.state = {"mode": "CC", "level": 0.5, "on": False, "v": 0.0, "i": 0.0, "p": 0.0}
 
     def payload(self) -> dict:
@@ -191,7 +172,7 @@ class Bench:
         with self.lock:
             if role not in ("power", "load"):
                 raise InstrumentError(f"未知设备角色: {role}")
-            catalog = MODEL_CATALOG.get(role) or []
+            catalog = list(MODELS.get(role) or {})
             if model is None:
                 model = catalog[0] if catalog else ""
             if model not in catalog:
@@ -236,14 +217,15 @@ class Bench:
             dev = self.get_dev(dev_id)
             # 负载允许在连接时改型号（未连接状态下才连得上，天然安全）
             if dev.role == "load" and model and model != dev.model:
-                if model not in LOAD_MODEL_SPECS:
+                if model not in MODELS["load"]:
                     raise InstrumentError(f"未知负载型号: {model}")
                 dev.model = model
-                dev.range = dict(LOAD_MODEL_SPECS[model])
+                dev.range = dict(MODELS["load"][model]["ranges"])
             self._disconnect_dev(dev, keep_log=True)
+            entry = MODELS[dev.role][dev.model]
             if dev.role == "power":
                 if sim:
-                    drv = SimPower()
+                    drv = entry["sim"]()
                     # 与清单里第一台模拟负载联动（CH1 拉载演示）
                     for d in self.devices.values():
                         if d.role == "load" and d.driver is not None and d.meta.get("sim"):
@@ -251,7 +233,7 @@ class Bench:
                             d.driver.power = drv
                             break
                 else:
-                    drv = IT6302(SerialTransport(port, baud))
+                    drv = entry["driver"].open(port, baud)
                 dev.driver = drv
                 dev.meta.update({"connected": True, "sim": bool(sim),
                                  "port": "SIM" if sim else port, "baud": baud if not sim else 0,
@@ -262,7 +244,7 @@ class Bench:
                 self.log("ok", f"{dev.name} 已连接: {dev.meta['idn']} @ {dev.meta['port']}")
             else:
                 if sim:
-                    drv = SimLoad(model=dev.model)
+                    drv = entry["sim"](model=dev.model)
                     for d in self.devices.values():
                         if (d.role == "power" and d.driver is not None and d.meta.get("sim")
                                 and getattr(d.driver, "load", None) is None):
@@ -270,10 +252,7 @@ class Bench:
                             drv.power = d.driver
                             break
                 else:
-                    if getattr(LOAD_DRIVERS[dev.model], "LEGACY_SERIAL", False):
-                        drv = LOAD_DRIVERS[dev.model](port, baud)
-                    else:
-                        drv = LOAD_DRIVERS[dev.model](SerialTransport(port, baud))
+                    drv = entry["driver"].open(port, baud)
                 dev.driver = drv
                 dev.meta.update({"connected": True, "sim": bool(sim),
                                  "port": "SIM" if sim else port, "baud": baud if not sim else 0,
@@ -481,11 +460,10 @@ class Bench:
             return self.snapshot()
 
     # ---------------- 更新检查 ----------------
-    _UPDATE_CACHE = "update_cache.json"          # APPDATA/LabConsole/ 下
+    _UPDATE_CACHE = "update_cache.json"          # sysenv.app_data_dir()/ 下
 
     def _update_cache_path(self) -> Path:
-        base = os.environ.get("APPDATA") or str(Path.home())
-        return Path(base) / "LabConsole" / self._UPDATE_CACHE
+        return sysenv.app_data_dir() / self._UPDATE_CACHE
 
     def _update_cache_load(self) -> None:
         """启动时恢复上次 ETag 与检查结果: 重启后的首次检查即可走 304 缓存。"""
@@ -661,7 +639,7 @@ class Bench:
             raise InstrumentError(f"下载失败（可能需要网络代理）: {exc}")
 
         if is_setup:
-            os.startfile(str(dest))                # 安装向导接管, 覆盖安装
+            sysenv.open_external(dest)             # 安装向导接管, 覆盖安装
             self.log("ok", f"更新安装向导已启动 → {dest}")
             return {"mode": "setup", "path": str(dest),
                     "message": "安装向导已启动，按提示完成覆盖安装后重新打开程序即可"}
@@ -1082,7 +1060,7 @@ class Bench:
 
     def record_export(self, rid: int, overview: bool = True, chart: bool = True) -> dict:
         """导出已结束的记录为 .xlsm; 可选概览页(第一页)与曲线图页(最后一页)。"""
-        if not HAS_XLSX:
+        if not recording.HAS_XLSX:
             raise InstrumentError("未安装 openpyxl, 无法导出 Excel; 请 pip install openpyxl")
         with self.lock:
             rec = self.pending_exports.get(int(rid))
@@ -1093,7 +1071,7 @@ class Bench:
             overview = bool(overview)
             chart = bool(chart)
         try:
-            self._write_recording_xlsm(rec, rows, overview, chart)
+            recording.write_recording_xlsx(rec, rows, overview, chart)
         except PermissionError:
             raise InstrumentError(
                 "文件正被占用，无法写出——通常是因为它已用 Excel/WPS 打开。"
@@ -1107,253 +1085,6 @@ class Bench:
         self.log("ok", f"记录 #{rec['id']} 已导出 {len(rows)} 点 ({what.rstrip(' + ')}) → {path}")
         return {"ok": True, "path": path, "count": len(rows),
                 "overview": overview, "chart": chart}
-    @staticmethod
-    def _combined_point(d: dict, o: dict) -> list:
-        """逻辑输出取值：单通道直读；组合按串联 ΣV/min I、并联 V/ΣI。d 为该机采样。"""
-        chs = o["chs"]
-        if len(chs) == 1:
-            return list(d.get(f"ch{chs[0]}") or [None, None, None])
-        A = d.get(f"ch{chs[0]}")
-        B = d.get(f"ch{chs[1]}")
-        if not A or not B:
-            return [None, None, None]
-        if o["series"]:
-            return [A[0] + B[0], min(A[1], B[1]), A[2] + B[2]]
-        return [A[0], A[1] + B[1], A[2] + B[2]]
-
-    @staticmethod
-    def _csv_time(t: float) -> str:
-        """CSV 时间列：精确到毫秒（记录间隔可小于 1s，秒级会重复）。"""
-        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) + f".{int(t * 1000) % 1000:03d}"
-
-    def _rec_columns(self, rec: dict) -> list:
-        """数据表列定义: [(表头, 取值函数)]。取值函数输入行 h 返回数值或 None。"""
-        if rec["role"] == "power":
-            cols = [("时间", None)]
-            for o in rec["outputs"]:
-                for suffix, idx in (("电压_V", 0), ("电流_A", 1), ("功率_W", 2)):
-                    cols.append((f"{o['label']}_{suffix}",
-                                 lambda h, _o=o, _i=idx: (self._combined_point(h["d"], _o) or [None]*3)[_i]))
-            return cols
-        cols = [("时间", None), ("电压_V", lambda h: h["d"]["load"][0]),
-                ("电流_A", lambda h: h["d"]["load"][1]), ("功率_W", lambda h: h["d"]["load"][2]),
-                ("工作模式", lambda h: h["d"].get("lset", ["", ""])[0]),
-                ("设定值", lambda h: h["d"].get("lset", ["", ""])[1])]
-        return cols
-
-    @staticmethod
-    def _xlsm_time(t: float) -> datetime:
-        return datetime.fromtimestamp(t)
-
-    def _write_recording_xlsm(self, rec: dict, rows: list, overview: bool, chart: bool) -> None:
-        """导出 .xlsx: [概览(可选,第一页)] + 数据 + [曲线图(可选,最后页)]。"""
-        cols = self._rec_columns(rec)
-        num_cols = [c for c in cols if c[1] is not None and c[0] != "工作模式"]
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "数据"
-
-        # ---- 数据表 ----
-        ws.append([c[0] for c in cols])
-        for h in rows:
-            line = [self._xlsm_time(h["t"])]
-            for c in cols[1:]:
-                try:
-                    v = c[1](h)
-                except Exception:  # noqa: BLE001
-                    v = None
-                line.append(v)
-            ws.append(line)
-        # 时间列格式: 毫秒精度 (记录间隔可小于 1s)
-        for r in range(2, len(rows) + 2):
-            ws.cell(row=r, column=1).number_format = "yyyy-mm-dd hh:mm:ss.000"
-        # 宽度 24: 时间串 "yyyy-mm-dd hh:mm:ss.000" 共 23 字符, 窄了会显示成 ####
-        ws.column_dimensions["A"].width = 24
-        for i in range(2, len(cols) + 1):
-            ws.column_dimensions[get_column_letter(i)].width = 14
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-            cell.fill = PatternFill("solid", fgColor="DDEBF7")
-        ws.freeze_panes = "A2"
-
-        # ---- 概览 (第一页) ----
-        if overview:
-            ov = wb.create_sheet("概览", 0)
-            t0s = self._csv_time(rec["t0"]) if rows else "—"
-            t1s = self._csv_time(rows[-1]["t"]) if rows else "—"
-            iv = rec.get("interval", POLL_INTERVAL)
-            outs_txt = " + ".join(o["label"] for o in rec["outputs"]) if rec["role"] == "power" \
-                else "电压 / 电流 / 功率 (含工作模式)"
-            info = [
-                ("测试概览", None),
-                ("仪器", f"{rec.get('dev_name', '')}（{rec.get('dev_model', '')}）"),
-                ("仪器标识", rec.get("dev_idn", "") or "—"),
-                ("记录对象", outs_txt),
-                ("开始时间", t0s),
-                ("结束时间", t1s),
-                ("采样点数", len(rows)),
-                ("采样间隔", f"{iv:g} 秒"),
-                ("生成时间", self._csv_time(time.time())),
-            ]
-            for k, v in info:
-                ov.append([k, v])
-            ov["A1"].font = Font(bold=True, size=14)
-            for r in range(2, len(info) + 1):
-                ov.cell(row=r, column=1).font = Font(bold=True)
-            ov.column_dimensions["A"].width = 14
-            ov.column_dimensions["B"].width = 46
-
-            # 统计表
-            stat_row = len(info) + 2
-            ov.cell(row=stat_row, column=1, value="统计").font = Font(bold=True, size=12)
-            head = ["通道", "最小值", "最大值", "平均值"]
-            for j, htxt in enumerate(head, start=1):
-                c = ov.cell(row=stat_row + 1, column=j, value=htxt)
-                c.font = Font(bold=True)
-                c.fill = PatternFill("solid", fgColor="DDEBF7")
-            for i, (title, fn) in enumerate(num_cols):
-                vals = []
-                for h in rows:
-                    try:
-                        v = fn(h)
-                    except Exception:  # noqa: BLE001
-                        v = None
-                    if isinstance(v, (int, float)):
-                        vals.append(float(v))
-                r = stat_row + 2 + i
-                ov.cell(row=r, column=1, value=title)
-                if vals:
-                    ov.cell(row=r, column=2, value=min(vals))
-                    ov.cell(row=r, column=3, value=max(vals))
-                    ov.cell(row=r, column=4, value=sum(vals) / len(vals))
-                else:
-                    ov.cell(row=r, column=2, value="—")
-                    ov.cell(row=r, column=3, value="—")
-                    ov.cell(row=r, column=4, value="—")
-            tip = ov.cell(row=stat_row + 2 + len(num_cols) + 1, column=1,
-                          value="详细数据见「数据」表" + ("；曲线见「曲线图」表。" if chart else "。"))
-            tip.font = Font(italic=True, color="808080")
-            ov.column_dimensions["C"].width = 12
-            ov.column_dimensions["D"].width = 12
-
-        # ---- 曲线图 (最后一页): 单张图双 Y 轴, 电压/功率左轴 + 电流右轴 ----
-        # 教训 (2026-11-07 真机文件排查):
-        #   1. "工作模式"是文本列, 混入折线图会让 Excel 渲染异常 (整图无曲线);
-        #   2. 类别轴直接引用 datetime 列时 openpyxl 生成 numRef, Excel 显示
-        #      内部序列号而非时间 —— 需要时间文本辅助列做类别源;
-        #   3. openpyxl 默认 x_axis.axPos='l' 且缺 tickLblPos/delete, 轴会错位/隐藏,
-        #      必须显式 axPos='b'、tickLblPos、delete=False;
-        #   4. 固定三色 (电压蓝/电流红/功率绿), 次轴组须 crosses='max' 且关闭自身
-        #      网格, 否则两套网格线交叉。
-        if chart and rows:
-            tcol = len(cols) + 1                    # 辅助列: 时间文本 (类别源)
-            hc = ws.cell(row=1, column=tcol, value="时间(曲线用)")
-            hc.font = Font(bold=True, color="808080")
-            for i, h in enumerate(rows, start=2):
-                ws.cell(row=i, column=tcol,
-                        value=time.strftime("%H:%M:%S", time.localtime(h["t"])))
-            ws.column_dimensions[get_column_letter(tcol)].width = 11
-
-            ch = wb.create_sheet("曲线图")
-            ch.sheet_view.showGridLines = False
-
-            # 每张图 = 双 Y 轴 (电压/功率 左轴, 电流 右轴);
-            # 电源多路记录时 **每一路单独一张图** (2026-11-07 用户要求),
-            # 负载单路保持一张总图。列匹配用前缀, 避免多路串图。
-            def _cols_for(prefix, key):
-                return [i for i, c in enumerate(cols)
-                        if c[0].startswith(prefix) and key in c[0]]
-
-            def _build_dual_chart(title, prefix):
-                """构建一张双轴折线图: 左轴电压+功率, 右轴电流。"""
-                nch = LineChart()
-                nch.title = title
-                nch.style = 2
-                nch.height, nch.width = 12, 28
-                # 布局方案 (2026-11-07 用户截图三次反馈):
-                #   渲染器对无布局信息的图表不自动让位 —— 图例与时间刻度叠字、
-                #   y 轴标题贴数字。显式 ManualLayout 把画布划成四块:
-                #   标题(顶部自动) / 绘图区 0.12~0.76 / 时间标签 0.76~0.90 /
-                #   图例 0.90~0.98, 左右各留 0.12 给轴标题与数字。
-                nch.layout = Layout(manualLayout=ManualLayout(
-                    xMode="edge", yMode="edge", layoutTarget="inner",
-                    x=0.12, y=0.14, w=0.78, h=0.62))
-                nch.y_axis.title = "电压·功率 (V·W)"
-                nch.y_axis.number_format = "0.000"
-                nch.y_axis.majorTickMark = "out"
-                nch.x_axis.delete = False
-                nch.y_axis.delete = False
-                nch.x_axis.axPos = "b"
-                nch.y_axis.axPos = "l"
-                nch.x_axis.tickLblPos = "nextTo"
-                nch.y_axis.tickLblPos = "nextTo"
-                nch.x_axis.majorTickMark = "out"
-                nch.x_axis.tickLblSkip = max(1, len(rows) // 10)
-                nch.x_axis.tickMarkSkip = max(1, len(rows) // 10)
-                nch.y_axis.majorGridlines = ChartLines()
-                nch.y_axis.crosses = "autoZero"
-
-                def _add(target, key, color):
-                    added = 0
-                    for idx in _cols_for(prefix, key):
-                        ref = Reference(ws, min_col=idx + 1, max_col=idx + 1,
-                                        min_row=1, max_row=len(rows) + 1)
-                        target.add_data(ref, titles_from_data=True)
-                        s = target.series[-1]
-                        s.smooth = False
-                        s.graphicalProperties.line.width = 18000  # ≈1.4pt
-                        s.graphicalProperties.line.solidFill = color
-                        added += 1
-                    return added
-
-                si = _add(nch, "电压", "2E75B6")     # 蓝
-                si += _add(nch, "功率", "548235")    # 绿
-                nch.set_categories(Reference(ws, min_col=tcol, min_row=2,
-                                             max_row=len(rows) + 1))
-
-                right = LineChart()
-                right.y_axis.axId = 200
-                right.y_axis.title = "电流 (A)"
-                right.y_axis.number_format = "0.000"
-                right.y_axis.majorTickMark = "out"
-                right.y_axis.delete = False
-                right.y_axis.axPos = "r"
-                right.y_axis.tickLblPos = "nextTo"
-                right.y_axis.crosses = "max"               # 贴右侧
-                right.y_axis.majorGridlines = None         # 网格只用左轴的
-                ri = _add(right, "电流", "C00000")          # 红
-                right.set_categories(Reference(ws, min_col=tcol, min_row=2,
-                                               max_row=len(rows) + 1))
-                nch += right                               # 合并为双轴图
-
-                if si + ri <= 1:
-                    nch.legend = None
-                else:
-                    nch.legend.position = "b"
-                    # 图例固定在最底部一条, 与时间标签分区 (不依赖渲染器自动布局)
-                    nch.legend.layout = Layout(manualLayout=ManualLayout(
-                        xMode="edge", yMode="edge",
-                        x=0.12, y=0.90, w=0.78, h=0.08))
-                return nch
-
-            # 图规格: 负载一张总图; 电源每个逻辑输出一张
-            if rec["role"] == "power":
-                specs = [(f"{o['label']} 记录曲线", f"{o['label']}_")
-                         for o in rec["outputs"]]
-            else:
-                specs = [("U / I / W 记录曲线", "")]
-
-            anchors = [f"B{2 + k * 25}" for k in range(len(specs))]
-            for k, (title, prefix) in enumerate(specs):
-                ch.add_chart(_build_dual_chart(title, prefix), anchors[k])
-            note = ch.cell(row=2 + len(specs) * 25, column=2,
-                           value="双击图表可在 Excel 中编辑；左轴=电压/功率，右轴=电流；数据源为「数据」表。")
-            note.font = Font(italic=True, color="808080")
-
-        Path(rec["path"]).parent.mkdir(parents=True, exist_ok=True)
-        wb.save(rec["path"])
-
     # ---------------- 快照 ----------------
     def snapshot(self) -> dict:
         with self.lock:
@@ -1373,15 +1104,13 @@ class Bench:
                 "app_version": APP_VERSION,
                 "update": self.update_info,
                 "devices": [d.payload() for d in self.devices.values()],
-                "models": MODEL_CATALOG,
+                "models": {role: list(entries) for role, entries in MODELS.items()},
                 # 各型号串口能力: 前端波特率下拉据此按型号渲染
                 "model_specs": {
-                    "power": {m: {"baud_rates": s.get("baud_rates", []),
-                                  "baud_default": s.get("baud_default", 9600)}
-                              for m, s in POWER_MODEL_SPECS.items()},
-                    "load": {m: {"baud_rates": s.get("baud_rates", []),
-                                 "baud_default": s.get("baud_default", 9600)}
-                             for m, s in LOAD_MODEL_SPECS.items()},
+                    role: {m: {"baud_rates": e.get("baud_rates", []),
+                               "baud_default": e.get("baud_default", 9600)}
+                           for m, e in entries.items()}
+                    for role, entries in MODELS.items()
                 },
                 "history": chart,
                 "recent": recent,
@@ -1600,7 +1329,7 @@ def shutdown() -> None:
 
 def main() -> None:
     """浏览器模式（开发/调试用）；桌面模式请运行 desktop.py。"""
-    ap = argparse.ArgumentParser(description="ITECH IT6302 + IT8511A+ 上位机")
+    ap = argparse.ArgumentParser(description="Lab Console 实验室仪器控制台上位机")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--no-browser", action="store_true")
@@ -1615,7 +1344,7 @@ def main() -> None:
     srv = build_server(args.host, args.port)
     url = f"http://{args.host}:{srv.server_address[1]}/"
     print("=" * 56)
-    print("  ITECH 上位机  |  IT6302 电源 + IT8511A+ 电子负载")
+    print("  Lab Console  |  IT6302 电源 + IT8511A+ 电子负载")
     print("=" * 56)
     print(f"  界面地址: {url}")
     print(f"  pyserial: {'已安装' if HAS_SERIAL else '未安装 (仅模拟模式)'}")

@@ -399,32 +399,6 @@ class IT8511APlusLegacy(IT8510Legacy):
     MAX_P = 150.0
 
 
-# 型号注册表: 前端"添加仪器"对话框与后端量程校验共用
-# baud_rates: 该型号串口实际支持的波特率 (前端下拉据此渲染; 官方手册依据)
-#   IT8510 老款: 仅 4800 (2026-11-02 真机实测其他速率无响应)
-#   IT8511A+: 仅 9600 (2026-11-03 真机实测 4800/19200/38400 均无响应; SCPI
-#             探测同样全波特率无响应, 该机串口仅支持帧协议)
-#   IT6302: 4800/9600/38400 (用户手册 BAUD 菜单)
-LOAD_MODEL_SPECS = {
-    "IT8511A+": {"max_v": 150.0, "max_i": 30.0, "max_p": 150.0, "max_r": 7500.0,
-                 "baud_rates": [9600], "baud_default": 9600},
-    "IT8510": {"max_v": 120.0, "max_i": 20.0, "max_p": 120.0, "max_r": 4000.0,
-               "baud_rates": [4800], "baud_default": 4800},
-}
-LOAD_DRIVERS = {
-    # IT8511A+ 后面板 DB9 是 TTL 电平口, 必须经 IT-E121/E121A(RS232)/IT-E122(USB)
-    # 通信模块连电脑, 协议与 IT8510 老款同族 (IT8500 帧), 但默认 9600bps ——
-    # 不能用 SCPI 驱动 (真机 2026-11-03: 标识帧返回 8511A, SN 4747410185)
-    "IT8511A+": IT8511APlusLegacy,
-    "IT8510": IT8510Legacy,
-}
-POWER_MODEL_SPECS = {
-    "IT6302": {"channels": 3, "baud_rates": [4800, 9600, 38400], "baud_default": 9600},
-}
-MODEL_CATALOG = {
-    "power": ["IT6302"],
-    "load": ["IT8511A+", "IT8510"],
-}
 
 
 # --------------------------------------------------------------------------- #
@@ -558,3 +532,88 @@ class SimLoad:
 
     def close(self) -> None:
         pass
+
+
+# --------------------------------------------------------------------------- #
+# 统一型号注册表
+# --------------------------------------------------------------------------- #
+# 新增型号只需在 MODELS 里注册一个条目 (驱动类 + 规格 + 模拟器),
+# 以下能力全部自动跟随, 不需要再改任何其他文件:
+#   - 前端"添加仪器"对话框的型号列表 (MODEL_CATALOG)
+#   - 连接对话框波特率下拉 (baud_rates / baud_default)
+#   - 连接逻辑 (entry["driver"].open(port, baud) 统一构造)
+#   - 负载量程校验 (ranges)
+#   - 模拟模式 (entry["sim"])
+# entry 字段:
+#   driver       真实仪器驱动类, 必须提供 classmethod open(port, baud)
+#   sim          模拟器类; 负载类模拟器接受 model= 关键字
+#   label        中文一句话描述 (前端提示用)
+#   channels     通道数 (电源); 负载固定 1
+#   baud_rates / baud_default
+#   ranges       负载量程字典 (max_v/max_i/max_p/max_r)
+class ScpiTransportMixin:
+    """SCPI 驱动的统一构造入口: 与二进制协议驱动保持同一 open() 签名。"""
+
+    @classmethod
+    def open(cls, port: str, baud: int):
+        return cls(SerialTransport(port, baud))
+
+
+class LegacyTransportMixin:
+    """二进制帧协议驱动的统一构造入口: 驱动自身管理串口参数。"""
+
+    @classmethod
+    def open(cls, port: str, baud: int):
+        return cls(port, baud)
+
+
+# 统一构造入口: 真实驱动一律 entry["driver"].open(port, baud) 创建,
+# 协议差异 (SCPI 包 SerialTransport / 二进制协议自管串口) 由各自 open 吸收。
+IT6302.open = ScpiTransportMixin.open
+IT8511A.open = ScpiTransportMixin.open
+IT8510Legacy.open = LegacyTransportMixin.open      # IT8511APlusLegacy 继承之
+
+MODELS: dict[str, dict[str, dict]] = {
+    "power": {
+        "IT6302": {
+            "driver": IT6302,
+            "sim": SimPower,
+            "label": "三路可编程直流电源",
+            "channels": 3,
+            "baud_rates": [4800, 9600, 38400],
+            "baud_default": 9600,
+        },
+    },
+    "load": {
+        "IT8511A+": {
+            "driver": IT8511APlusLegacy,
+            "sim": SimLoad,
+            "label": "可编程直流电子负载 (150V/30A/150W)",
+            "channels": 1,
+            "baud_rates": [9600], "baud_default": 9600,
+            # IT8511A+ 串口仅支持 9600 (2026-11-03 真机实测其余速率无响应);
+            # 后面板 DB9 为 TTL 电平口, 必须经 IT-E121/E122 通信模块
+            "ranges": {"max_v": 150.0, "max_i": 30.0, "max_p": 150.0, "max_r": 7500.0},
+        },
+        "IT8510": {
+            "driver": IT8510Legacy,
+            "sim": SimLoad,
+            "label": "可编程直流电子负载 (120V/20A/120W, 老款)",
+            "channels": 1,
+            "baud_rates": [4800], "baud_default": 4800,
+            "ranges": {"max_v": 120.0, "max_i": 20.0, "max_p": 120.0, "max_r": 4000.0},
+        },
+    },
+}
+
+# 派生视图 (兼容既有引用; 新代码请直接用 MODELS)
+MODEL_CATALOG = {role: list(entries) for role, entries in MODELS.items()}
+POWER_MODEL_SPECS = {m: {"channels": e["channels"],
+                         "baud_rates": e["baud_rates"],
+                         "baud_default": e["baud_default"]}
+                     for m, e in MODELS["power"].items()}
+LOAD_MODEL_SPECS = {m: dict(e["ranges"], baud_rates=e["baud_rates"],
+                            baud_default=e["baud_default"])
+                    for m, e in MODELS["load"].items()}
+POWER_DRIVERS = {m: e["driver"] for m, e in MODELS["power"].items()}
+LOAD_DRIVERS = {m: e["driver"] for m, e in MODELS["load"].items()}
