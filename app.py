@@ -1141,89 +1141,99 @@ class Bench:
                         value=time.strftime("%H:%M:%S", time.localtime(h["t"])))
             ws.column_dimensions[get_column_letter(tcol)].width = 11
 
-            def _members(label):
-                return [i for i, c in enumerate(cols) if label in c[0]]
-
             ch = wb.create_sheet("曲线图")
             ch.sheet_view.showGridLines = False
 
-            # 主图: 左轴 = 电压 + 功率 (同为 0~150 量级)
-            nch = LineChart()
-            nch.title = "U / I / W 记录曲线"
-            nch.style = 2
-            nch.height, nch.width = 12, 28
-            # 布局方案 (2026-11-07 用户截图三次反馈):
-            #   渲染器对无布局信息的图表不自动让位 —— 图例与时间刻度叠字、
-            #   y 轴标题贴数字。改用 **显式 ManualLayout** 把画布划成四块:
-            #   标题(顶部自动) / 绘图区 0.12~0.78 / 时间标签 0.78~0.86 /
-            #   图例 0.86~0.95, 左右各留 0.12 给轴标题与数字。
-            #   y 轴标题恢复中文带单位 ("电压·功率 (V·W)" / "电流 (A)"),
-            #   刻度数字还原纯数值 (单位后缀方案用户不认可)。
-            nch.layout = Layout(manualLayout=ManualLayout(
-                xMode="edge", yMode="edge", layoutTarget="inner",
-                x=0.12, y=0.14, w=0.78, h=0.62))
-            nch.y_axis.title = "电压·功率 (V·W)"
-            nch.y_axis.number_format = "0.000"
-            nch.y_axis.majorTickMark = "out"
-            nch.x_axis.delete = False
-            nch.y_axis.delete = False
-            nch.x_axis.axPos = "b"
-            nch.y_axis.axPos = "l"
-            nch.x_axis.tickLblPos = "nextTo"
-            nch.y_axis.tickLblPos = "nextTo"
-            nch.x_axis.majorTickMark = "out"
-            nch.x_axis.tickLblSkip = max(1, len(rows) // 10)
-            nch.x_axis.tickMarkSkip = max(1, len(rows) // 10)
-            nch.y_axis.majorGridlines = ChartLines()
-            nch.y_axis.crosses = "autoZero"
+            # 每张图 = 双 Y 轴 (电压/功率 左轴, 电流 右轴);
+            # 电源多路记录时 **每一路单独一张图** (2026-11-07 用户要求),
+            # 负载单路保持一张总图。列匹配用前缀, 避免多路串图。
+            def _cols_for(prefix, key):
+                return [i for i, c in enumerate(cols)
+                        if c[0].startswith(prefix) and key in c[0]]
 
-            def _add_series(target, label, color):
-                added = 0
-                for idx in _members(label):
-                    ref = Reference(ws, min_col=idx + 1, max_col=idx + 1,
-                                    min_row=1, max_row=len(rows) + 1)
-                    target.add_data(ref, titles_from_data=True)
-                    s = target.series[-1]
-                    s.smooth = False
-                    s.graphicalProperties.line.width = 18000  # ≈1.4pt
-                    s.graphicalProperties.line.solidFill = color
-                    added += 1
-                return added
+            def _build_dual_chart(title, prefix):
+                """构建一张双轴折线图: 左轴电压+功率, 右轴电流。"""
+                nch = LineChart()
+                nch.title = title
+                nch.style = 2
+                nch.height, nch.width = 12, 28
+                # 布局方案 (2026-11-07 用户截图三次反馈):
+                #   渲染器对无布局信息的图表不自动让位 —— 图例与时间刻度叠字、
+                #   y 轴标题贴数字。显式 ManualLayout 把画布划成四块:
+                #   标题(顶部自动) / 绘图区 0.12~0.76 / 时间标签 0.76~0.90 /
+                #   图例 0.90~0.98, 左右各留 0.12 给轴标题与数字。
+                nch.layout = Layout(manualLayout=ManualLayout(
+                    xMode="edge", yMode="edge", layoutTarget="inner",
+                    x=0.12, y=0.14, w=0.78, h=0.62))
+                nch.y_axis.title = "电压·功率 (V·W)"
+                nch.y_axis.number_format = "0.000"
+                nch.y_axis.majorTickMark = "out"
+                nch.x_axis.delete = False
+                nch.y_axis.delete = False
+                nch.x_axis.axPos = "b"
+                nch.y_axis.axPos = "l"
+                nch.x_axis.tickLblPos = "nextTo"
+                nch.y_axis.tickLblPos = "nextTo"
+                nch.x_axis.majorTickMark = "out"
+                nch.x_axis.tickLblSkip = max(1, len(rows) // 10)
+                nch.x_axis.tickMarkSkip = max(1, len(rows) // 10)
+                nch.y_axis.majorGridlines = ChartLines()
+                nch.y_axis.crosses = "autoZero"
 
-            si = _add_series(nch, "电压", "2E75B6")     # 蓝
-            si += _add_series(nch, "功率", "548235")    # 绿
-            nch.set_categories(Reference(ws, min_col=tcol, min_row=2,
-                                         max_row=len(rows) + 1))
-            if si == 1:
-                nch.legend = None
+                def _add(target, key, color):
+                    added = 0
+                    for idx in _cols_for(prefix, key):
+                        ref = Reference(ws, min_col=idx + 1, max_col=idx + 1,
+                                        min_row=1, max_row=len(rows) + 1)
+                        target.add_data(ref, titles_from_data=True)
+                        s = target.series[-1]
+                        s.smooth = False
+                        s.graphicalProperties.line.width = 18000  # ≈1.4pt
+                        s.graphicalProperties.line.solidFill = color
+                        added += 1
+                    return added
 
-            # 次图: 右轴 = 电流
-            right = LineChart()
-            right.y_axis.axId = 200
-            right.y_axis.title = "电流 (A)"
-            right.y_axis.number_format = "0.000"
-            right.y_axis.majorTickMark = "out"
-            right.y_axis.delete = False
-            right.y_axis.axPos = "r"
-            right.y_axis.tickLblPos = "nextTo"
-            right.y_axis.crosses = "max"               # 贴右侧
-            right.y_axis.majorGridlines = None         # 网格只用左轴的
-            ri = _add_series(right, "电流", "C00000")   # 红
-            right.set_categories(Reference(ws, min_col=tcol, min_row=2,
-                                           max_row=len(rows) + 1))
-            nch += right                               # 合并为双轴图
+                si = _add(nch, "电压", "2E75B6")     # 蓝
+                si += _add(nch, "功率", "548235")    # 绿
+                nch.set_categories(Reference(ws, min_col=tcol, min_row=2,
+                                             max_row=len(rows) + 1))
 
-            total = si + ri
-            if total <= 1:
-                nch.legend = None
+                right = LineChart()
+                right.y_axis.axId = 200
+                right.y_axis.title = "电流 (A)"
+                right.y_axis.number_format = "0.000"
+                right.y_axis.majorTickMark = "out"
+                right.y_axis.delete = False
+                right.y_axis.axPos = "r"
+                right.y_axis.tickLblPos = "nextTo"
+                right.y_axis.crosses = "max"               # 贴右侧
+                right.y_axis.majorGridlines = None         # 网格只用左轴的
+                ri = _add(right, "电流", "C00000")          # 红
+                right.set_categories(Reference(ws, min_col=tcol, min_row=2,
+                                               max_row=len(rows) + 1))
+                nch += right                               # 合并为双轴图
+
+                if si + ri <= 1:
+                    nch.legend = None
+                else:
+                    nch.legend.position = "b"
+                    # 图例固定在最底部一条, 与时间标签分区 (不依赖渲染器自动布局)
+                    nch.legend.layout = Layout(manualLayout=ManualLayout(
+                        xMode="edge", yMode="edge",
+                        x=0.12, y=0.90, w=0.78, h=0.08))
+                return nch
+
+            # 图规格: 负载一张总图; 电源每个逻辑输出一张
+            if rec["role"] == "power":
+                specs = [(f"{o['label']} 记录曲线", f"{o['label']}_")
+                         for o in rec["outputs"]]
             else:
-                nch.legend.position = "b"
-                # 图例固定在最底部一条, 与时间标签分区 (不依赖渲染器自动布局)
-                nch.legend.layout = Layout(manualLayout=ManualLayout(
-                    xMode="edge", yMode="edge",
-                    x=0.12, y=0.90, w=0.78, h=0.08))
-            ch.add_chart(nch, "B2")
-            note = ch.cell(row=26, column=2,
+                specs = [("U / I / W 记录曲线", "")]
+
+            anchors = [f"B{2 + k * 25}" for k in range(len(specs))]
+            for k, (title, prefix) in enumerate(specs):
+                ch.add_chart(_build_dual_chart(title, prefix), anchors[k])
+            note = ch.cell(row=2 + len(specs) * 25, column=2,
                            value="双击图表可在 Excel 中编辑；左轴=电压/功率，右轴=电流；数据源为「数据」表。")
             note.font = Font(italic=True, color="808080")
 
