@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import random
 import re
+import struct
 import threading
 import time
 
@@ -554,6 +555,375 @@ class SimLoad:
 
 
 # --------------------------------------------------------------------------- #
+# 示波器: USB (USBTMC) 传输与 Keysight InfiniiVision 1000X 驱动
+# --------------------------------------------------------------------------- #
+# 1000X 系列 (DSOX1102G/EDUX1002G 等) 只有 USB 设备口 (USBTMC), 无网口。
+# Windows 上 USBTMC 无系统自带驱动, 需把设备接口绑定 WinUSB (Zadig 一次性操作,
+# 见 docs 说明); 绑定后 libusb 才能访问, 与 Keysight IO Libraries 互斥。
+try:
+    import libusb_package
+    import usb.backend.libusb1
+    import usb.core
+    import usb.util
+
+    HAS_USB = True
+except ImportError:               # 未装 pyusb: 仍可用模拟模式
+    HAS_USB = False
+
+
+class UsbTmcTransport:
+    """一条 USBTMC 仪器会话 (与 SerialTransport 同构: write/query/close)。
+
+    协议 (USBTMC 1.0):
+      写 = Bulk OUT, 12 字节头 + 数据; 头的 TransferSize 为**不含 4 字节对齐
+      填充**的实际长度, 否则设备会把填充的 0x00 当作命令内容。
+      读 = 先发 REQUEST_DEV_DEP_MSG_IN (TransferSize 不能超过设备缓冲,
+      1MB 会被当成 0 长度空响应, 64KB 稳妥), 再从 Bulk IN 读头+数据,
+      直到 bmTransferAttributes 的 EOM 置位。
+    """
+
+    HEADER_FMT = "<BBBBI Bxxx"     # MsgID / bTag / ~bTag / rsv / size / flags / rsv
+    MSG_DEV_DEP_OUT = 1
+    MSG_DEV_DEP_IN = 2
+    FLAG_EOM = 0x01
+    FLAG_TERM = 0x02
+
+    def __init__(self, vid: int, pid: int, timeout_ms: int = 6000):
+        if not HAS_USB:
+            raise InstrumentError(
+                "未安装 pyusb/libusb-package, 无法使用 USB 示波器（可先用模拟模式）")
+        self.lock = threading.RLock()
+        self.timeout = timeout_ms
+        self.tag = 0
+        backend = usb.backend.libusb1.get_backend(
+            find_library=libusb_package.find_library)
+        dev = usb.core.find(idVendor=vid, idProduct=pid, backend=backend)
+        if dev is None:
+            raise InstrumentError(
+                "未找到 USB 示波器: 检查线缆连接, 且设备接口需已绑定 WinUSB 驱动")
+        self.dev = dev
+        try:
+            dev.set_configuration()
+        except Exception:  # noqa: BLE001
+            pass                              # 已配置 (Resource busy) 属正常
+        cfg = dev.get_active_configuration()
+        self.itf = cfg[(0, 0)]
+        self.ep_out = self.ep_in = None
+        for ep in self.itf:
+            if ep.bmAttributes & 0x03 == 0x02:
+                if ep.bEndpointAddress & 0x80:
+                    self.ep_in = ep
+                else:
+                    self.ep_out = ep
+        if not (self.ep_out and self.ep_in):
+            raise InstrumentError("USBTMC 端点缺失: 驱动绑定可能不正确")
+        self.serial = ""
+        for ep in (self.ep_out, self.ep_in):
+            try:
+                self.dev.clear_halt(ep.bEndpointAddress)
+            except Exception:  # noqa: BLE001
+                pass
+        self._flush()
+
+    # ---------- 内部 ----------
+    def _next_tag(self) -> int:
+        self.tag = self.tag % 255 + 1
+        return self.tag
+
+    def _header(self, msg_id: int, size: int, flags: int) -> bytes:
+        tag = self._next_tag()
+        return struct.pack(self.HEADER_FMT, msg_id, tag, (~tag) & 0xFF,
+                           0, size, flags)
+
+    def _flush(self) -> None:
+        """清掉上电/上次异常残留的响应 (读到超时为止)。"""
+        for _ in range(4):
+            try:
+                self.dev.read(self.ep_in.bEndpointAddress, 1 << 16, 60)
+            except Exception:  # noqa: BLE001
+                break
+
+    # ---------- 对外 ----------
+    def write(self, cmd: str) -> None:
+        data = cmd.encode("ascii", "replace")
+        if not data.endswith(b"\n"):
+            data += b"\n"
+        header = self._header(self.MSG_DEV_DEP_OUT, len(data), self.FLAG_EOM)
+        pad = (-len(data)) % 4
+        with self.lock:
+            try:
+                self.dev.write(self.ep_out.bEndpointAddress,
+                               header + data + b"\x00" * pad, self.timeout)
+            except Exception as exc:  # noqa: BLE001
+                raise InstrumentError(f"发送失败 [{cmd}]: {exc}") from exc
+
+    def read_raw(self, chunk: int = 1 << 16) -> bytes:
+        out: list[bytes] = []
+        with self.lock:
+            for _ in range(256):              # 防御上限 (16MB)
+                req = self._header(self.MSG_DEV_DEP_IN, chunk, 0)
+                self.dev.write(self.ep_out.bEndpointAddress, req, self.timeout)
+                hdr = bytes(self.dev.read(self.ep_in.bEndpointAddress, 12,
+                                          self.timeout))
+                if len(hdr) < 12:
+                    raise InstrumentError(f"响应头不完整 ({len(hdr)} 字节)")
+                _m, _t, _ti, _r, size, flags = struct.unpack(self.HEADER_FMT, hdr)
+                body = b""
+                remain = size
+                while remain > 0:
+                    got = bytes(self.dev.read(self.ep_in.bEndpointAddress,
+                                              min(remain, chunk), self.timeout))
+                    if not got:
+                        break
+                    body += got
+                    remain -= len(got)
+                out.append(body)
+                if flags & (self.FLAG_EOM | self.FLAG_TERM):
+                    break
+        return b"".join(out)
+
+    def query(self, cmd: str) -> str:
+        self.write(cmd)
+        try:
+            text = self.read_raw().decode("ascii", "replace").strip()
+        except Exception as exc:  # noqa: BLE001
+            raise InstrumentError(f"读取失败 [{cmd}]: {exc}") from exc
+        if not text:
+            raise InstrumentError(f"仪器返回空响应: {cmd}")
+        return text
+
+    def query_raw(self, cmd: str) -> bytes:
+        self.write(cmd)
+        return self.read_raw()
+
+    def close(self) -> None:
+        with self.lock:
+            try:
+                usb.util.dispose_resources(self.dev)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+class DSOX1102G:
+    """Keysight InfiniiVision 1000X 系列示波器 (DSOX1102G / EDUX1002G 同命令集)。
+
+    通信: USB USBTMC, VID 0x2A8D / PID 0x1797。
+    SCPI: 见《InfiniiVision 1000 X-Series Programmer's Guide》
+      *IDN? / :RUN / :STOP / :SINGle / :AUToscale
+      :MEASure:VPP?|VAVerage?|FREQuency? CHANnel{n}
+      :WAVeform:SOURce|FORMat BYTE|POINts|PREamble?|DATA?
+    """
+
+    VID = 0x2A8D
+    PID = 0x1797
+    MAX_POINTS = 2000                 # 屏幕显示用点数 (数据量小 → 刷新快)
+
+    @classmethod
+    def parse_port(cls, port: str) -> tuple[int, int]:
+        """端口串: 空 / 'USB' / 'usbtmc' / '2A8D:1797' → (vid, pid)。"""
+        vid, pid = cls.VID, cls.PID
+        text = (port or "").strip().lower()
+        if ":" in text:
+            try:
+                a, b = text.split(":", 1)
+                vid, pid = int(a, 16), int(b, 16)
+            except ValueError:
+                pass
+        return vid, pid
+
+    @classmethod
+    def open(cls, port: str = "", baud: int = 0):
+        """统一构造入口 (MODELS 注册表按 open(port, baud) 调用; 示波器无波特率)。"""
+        return cls(port)
+
+    def __init__(self, port: str = ""):
+        vid, pid = self.parse_port(port)
+        self.link = UsbTmcTransport(vid, pid)
+        self.serial = self.link.serial or ""
+        # 清设备输出队列: 上一次会话遗留的未读响应 (如截图/大块波形) 会被
+        # 本次第一条查询误读, 必须先冲洗干净再取 *IDN?
+        self.idn = self._read_idn()
+        self.running = True
+        self._pre = None              # 波形元信息缓存 (xinc/xorig/yinc/yorig)
+        self._wave_ch = 0
+        try:
+            self.link.write(":WAVeform:FORMat BYTE")
+            self.link.write(":WAVeform:MODE NORMal")
+            self.link.write(f":WAVeform:POINts {self.MAX_POINTS}")
+        except InstrumentError:
+            pass
+        self._drain_errors()
+
+    def _drain_errors(self) -> None:
+        """读空设备错误队列, 避免上一次会话的旧错误干扰自检显示。"""
+        for _ in range(8):
+            try:
+                err = self.link.query(":SYSTem:ERRor?")
+            except InstrumentError:
+                return
+            if err.startswith("+0") or "No error" in err:
+                return
+
+    def _read_idn(self) -> str:
+        """取 *IDN?, 遇到残留响应先冲洗再重试一次。"""
+        for attempt in range(3):
+            try:
+                self.link.write("*CLS")       # 清状态, 不动输出队列
+            except InstrumentError:
+                pass
+            self.link._flush()
+            try:
+                idn = self.link.query("*IDN?")
+            except InstrumentError:
+                idn = ""
+            if "," in idn and any(k in idn.upper() for k in
+                                  ("KEYSIGHT", "AGILENT", "DSO", "EDUX", "MSO")):
+                return idn
+            time.sleep(0.15 * (attempt + 1))
+        raise InstrumentError(
+            "示波器响应异常（读到的是遗留数据或设备忙），请拔插 USB 后重试")
+
+    # ---------- 采集控制 ----------
+    def run(self) -> None:
+        self.link.write(":RUN")
+        self.running = True
+
+    def stop(self) -> None:
+        self.link.write(":STOP")
+        self.running = False
+
+    def single(self) -> None:
+        self.link.write(":SINGle")
+        self.running = False
+
+    def autoscale(self) -> None:
+        self.link.write(":AUToscale")
+        time.sleep(1.2)               # 自动设置需要几帧稳定
+        self._pre = None
+
+    # ---------- 测量 ----------
+    def measure(self, ch: int = 1) -> dict:
+        """一次往返取三项测量 (设备内部逐条测量, 约 0.6s)。"""
+        cmd = (f":MEASure:VPP? CHANnel{ch};"
+               f":MEASure:VAVerage? CHANnel{ch};"
+               f":MEASure:FREQuency? CHANnel{ch}")
+        raw = self.link.query(cmd)
+        parts = [p.strip() for p in raw.replace("\n", ";").split(";") if p.strip()]
+        vals = [parse_float(p) for p in parts[:3]]
+        while len(vals) < 3:
+            vals.append(0.0)
+        return {"vpp": vals[0], "vavg": vals[1], "freq": vals[2]}
+
+    def channel_on(self, ch: int) -> bool:
+        try:
+            return parse_float(self.link.query(f":CHANnel{ch}:DISPlay?")) > 0.5
+        except InstrumentError:
+            return False
+
+    def set_channel(self, ch: int, on: bool) -> None:
+        self.link.write(f":CHANnel{ch}:DISPlay {'ON' if on else 'OFF'}")
+
+    # ---------- 波形 ----------
+    def waveform(self, ch: int = 1) -> dict:
+        """抓一帧波形: 返回 {'y': [...], 'x0': s, 'dx': s/点, 'tb': s/div}。"""
+        if ch != self._wave_ch:
+            self.link.write(f":WAVeform:SOURce CHANnel{ch}")
+            self._wave_ch = ch
+            self._pre = None
+        if self._pre is None:
+            pre = self.link.query(":WAVeform:PREamble?")
+            vals = [parse_float(v) for v in pre.split(",")]
+            # format,type,points,count,xincrement,xorigin,xreference,
+            # yincrement,yorigin,yreference
+            self._pre = {"dx": vals[4], "x0": vals[5],
+                         "dy": vals[7], "y0": vals[8], "yref": vals[9]}
+        pre = self._pre
+        raw = self.link.query_raw(":WAVeform:DATA?")
+        if raw[:1] != b"#":
+            raise InstrumentError(f"波形数据格式异常: {raw[:24]!r}")
+        nd = int(raw[1:2])
+        n = int(raw[2:2 + nd])
+        data = raw[2 + nd:2 + nd + n]
+        # BYTE 格式: 电压 = (原始值 - yreference) * yincrement + yorigin
+        ys = [(b - pre["yref"]) * pre["dy"] + pre["y0"] for b in data]
+        return {"y": ys, "x0": pre["x0"], "dx": pre["dx"]}
+
+    def raw_query(self, cmd: str) -> str:
+        """通用查询 (通信自检用)。"""
+        return self.link.query(cmd)
+
+    def local(self) -> None:
+        pass
+
+    def close(self) -> None:
+        try:
+            self.link.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+class SimScope:
+    """示波器模拟器: 双通道正弦 (CH1 300Hz/0.6Vpp, CH2 150Hz/1.2Vpp)。"""
+
+    POINTS = 800
+
+    def __init__(self, model: str = "DSOX1102G"):
+        self.model = model
+        self.idn = f"SIMULATED,{model},SIM000000,sim"
+        self.running = True
+        self.t0 = time.time()
+        self._rng = random.Random(7)
+        self.ch = {1: {"amp": 0.3, "freq": 287.0}, 2: {"amp": 0.6, "freq": 150.0}}
+
+    def run(self) -> None:
+        self.running = True
+
+    def stop(self) -> None:
+        self.running = False
+
+    def single(self) -> None:
+        self.running = False
+
+    def autoscale(self) -> None:
+        time.sleep(0.4)
+
+    def channel_on(self, ch: int) -> bool:
+        return ch in self.ch
+
+    def set_channel(self, ch: int, on: bool) -> None:
+        if on and ch not in self.ch:
+            self.ch[ch] = {"amp": 0.3, "freq": 287.0}
+        elif not on:
+            self.ch.pop(ch, None)
+
+    def measure(self, ch: int = 1) -> dict:
+        c = self.ch.get(ch, {"amp": 0.3, "freq": 100.0})
+        jitter = 1 + self._rng.uniform(-0.01, 0.01)
+        return {"vpp": round(c["amp"] * 2 * jitter, 4),
+                "vavg": round(self._rng.uniform(-0.01, 0.01), 4),
+                "freq": round(c["freq"] * jitter, 1)}
+
+    def waveform(self, ch: int = 1) -> dict:
+        import math
+        c = self.ch.get(ch, {"amp": 0.3, "freq": 100.0})
+        dx = 2e-4                                  # 200µs/点 → 160ms 窗
+        phase = (time.time() - self.t0) * c["freq"] * 2 * math.pi
+        ys = [c["amp"] * math.sin(phase + i * dx * c["freq"] * 2 * math.pi)
+              + self._rng.uniform(-0.004, 0.004)
+              for i in range(self.POINTS)]
+        return {"y": ys, "x0": -0.05, "dx": dx}
+
+    def raw_query(self, cmd: str) -> str:
+        return "SIMULATED"
+
+    def local(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+# --------------------------------------------------------------------------- #
 # 统一型号注册表
 # --------------------------------------------------------------------------- #
 # 新增型号只需在 MODELS 里注册一个条目 (驱动类 + 规格 + 模拟器),
@@ -600,6 +970,17 @@ MODELS: dict[str, dict[str, dict]] = {
             "channels": 1,
             "baud_rates": [4800], "baud_default": 4800,
             "ranges": {"max_v": 120.0, "max_i": 20.0, "max_p": 120.0, "max_r": 4000.0},
+        },
+    },
+    "scope": {
+        "DSOX1102G": {
+            "driver": DSOX1102G,
+            "sim": SimScope,
+            "label": "双通道数字示波器 (100MHz, USB 直连)",
+            "channels": 2,
+            # 示波器走 USB (USBTMC), 无串口/无波特率
+            "transport": "usbtmc",
+            "baud_rates": [0], "baud_default": 0,
         },
     },
 }

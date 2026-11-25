@@ -101,6 +101,12 @@ class Dev:
             }
             self.range = None
             self.state = None
+        elif role == "scope":
+            # 示波器: 每通道一组测量读数 + 运行状态 + 最近一帧波形
+            self.channels = {n: {"vpp": 0.0, "vavg": 0.0, "freq": 0.0, "on": n == 1}
+                             for n in (1, 2)}
+            self.range = None
+            self.state = {"run": True, "wave": {}}
         else:
             self.channels = None
             spec = MODELS["load"].get(model) or MODELS["load"]["IT8511A+"]
@@ -111,16 +117,51 @@ class Dev:
         d = {"id": self.id, "role": self.role, "name": self.name, "model": self.model, **self.meta}
         if self.role == "power":
             d["channels"] = self.channels
+        elif self.role == "scope":
+            d["channels"] = self.channels
+            d["run"] = self.state.get("run", True)
+            d["wave"] = self._wave_payload()
         else:
             d["range"] = self.range
             d.update(self.state)
         return d
+
+    def _wave_payload(self, max_points: int = 600) -> dict:
+        """把最近一帧波形降采样到 ≤max_points 点后交给前端绘图。
+
+        每个桶取最小/最大两点（包络），而不是简单抽点——否则高频噪声
+        在抽点后会产生混叠，画出来是一堆假毛刺。
+        """
+        out = {}
+        per_ch = max(80, max_points // 2)
+        for ch, w in (self.state.get("wave") or {}).items():
+            ys = w.get("y") or []
+            if not ys:
+                continue
+            step = max(1, -(-len(ys) // per_ch))
+            pts: list[float] = []
+            for i in range(0, len(ys), step):
+                seg = ys[i:i + step]
+                lo, hi = min(seg), max(seg)
+                if seg.index(lo) <= seg.index(hi):
+                    pts.extend((lo, hi))
+                else:
+                    pts.extend((hi, lo))
+            out[f"ch{ch}"] = {
+                "y": [round(float(v), 4) for v in pts],
+                "x0": w.get("x0", 0.0),
+                "dx": w.get("dx", 0.0) * step,
+            }
+        return out
 
     def sample(self) -> dict:
         """一条历史采样的本机数据。"""
         if self.role == "power":
             return {f"ch{n}": [self.channels[n]["v"], self.channels[n]["i"], self.channels[n]["p"]]
                     for n in (1, 2, 3)}
+        if self.role == "scope":
+            return {"scope": {f"ch{n}": [self.channels[n]["vpp"], self.channels[n]["freq"]]
+                              for n in (1, 2)}}
         return {"load": [self.state["v"], self.state["i"], self.state["p"]],
                 "lset": [self.state["mode"], self.state["level"]]}
 
@@ -148,13 +189,15 @@ class Bench:
         }
         self._sweep_stop = threading.Event()
         self._busy = False
+        self._scope_tick = 0
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._poll_thread.start()
         # 启动 3 秒后联网检查更新（失败静默, 不影响使用）
         threading.Thread(target=self._check_update_delayed, daemon=True).start()
-        # 默认清单：一台电源 + 一台负载（可再增删）
+        # 默认清单：一台电源 + 一台负载 + 一台示波器（可再增删）
         self.add_instrument("power")
         self.add_instrument("load")
+        self.add_instrument("scope")
 
     # ---------------- 日志 ----------------
     def log(self, level: str, text: str) -> None:
@@ -170,7 +213,7 @@ class Bench:
     # ---------------- 仪器清单：添加 / 删除 ----------------
     def add_instrument(self, role: str, model: str | None = None) -> dict:
         with self.lock:
-            if role not in ("power", "load"):
+            if role not in ("power", "load", "scope"):
                 raise InstrumentError(f"未知设备角色: {role}")
             catalog = list(MODELS.get(role) or {})
             if model is None:
@@ -186,7 +229,8 @@ class Bench:
                     except (ValueError, IndexError):
                         mx = max(mx, sum(1 for x in self.devices.values() if x.role == role))
             n = mx + 1
-            dev = Dev(role, model, f"电源 {n}" if role == "power" else f"负载 {n}")
+            prefix = {"power": "电源", "load": "负载", "scope": "示波器"}[role]
+            dev = Dev(role, model, f"{prefix} {n}")
             self.devices[dev.id] = dev
             self.log("ok", f"已添加仪器: {dev.name} · {model}（未连接）")
             return self.snapshot()
@@ -242,6 +286,16 @@ class Bench:
                 if safe_start:
                     self._power_all_off(dev)
                 self.log("ok", f"{dev.name} 已连接: {dev.meta['idn']} @ {dev.meta['port']}")
+            elif dev.role == "scope":
+                drv = entry["sim"]() if sim else entry["driver"].open(port, baud)
+                dev.driver = drv
+                dev.meta.update({"connected": True, "sim": bool(sim),
+                                 "port": "SIM" if sim else (port or "USB"),
+                                 "baud": 0, "idn": drv.idn, "error": ""})
+                dev.state["run"] = bool(getattr(drv, "running", True))
+                dev.state["wave"] = {}
+                self._scope_tick = 0
+                self.log("ok", f"{dev.name}[{dev.model}] 已连接: {dev.meta['idn']} @ {dev.meta['port']}")
             else:
                 if sim:
                     drv = entry["sim"](model=dev.model)
@@ -274,7 +328,7 @@ class Bench:
             try:
                 if dev.role == "power":
                     self._power_all_off(dev)
-                else:
+                elif dev.role == "load":
                     dev.driver.set_input(False)
                 dev.driver.local()
             except Exception:  # noqa: BLE001
@@ -294,6 +348,10 @@ class Bench:
         if dev.role == "power":
             for ch in dev.channels.values():
                 ch.update({"v": 0.0, "i": 0.0, "p": 0.0, "on": False})
+        elif dev.role == "scope":
+            for ch in dev.channels.values():
+                ch.update({"vpp": 0.0, "vavg": 0.0, "freq": 0.0})
+            dev.state["wave"] = {}
         else:
             dev.state.update({"v": 0.0, "i": 0.0, "p": 0.0, "on": False})
         if not keep_log:
@@ -431,6 +489,11 @@ class Bench:
                             driver.select(c)
                             q("VOLT?")
                             q("CURR?")
+                    elif role == "scope":
+                        for c in (1, 2):
+                            q(f":CHANnel{c}:DISPlay?")
+                        q(":TIMebase:SCALe?")
+                        q(":SYSTem:ERRor?")
                     else:
                         q("FUNC?")
                         q("INP?")
@@ -450,7 +513,7 @@ class Bench:
             for dev in self.devices.values():
                 if dev.role == "power":
                     self._power_all_off(dev)
-                elif dev.driver is not None:
+                elif dev.role == "load" and dev.driver is not None:
                     try:
                         dev.driver.set_input(False)
                     except Exception:  # noqa: BLE001
@@ -726,6 +789,12 @@ class Bench:
                             dev.meta["error"] = ""
                         except Exception as exc:  # noqa: BLE001
                             dev.meta["error"] = str(exc)
+                elif dev.role == "scope":
+                    try:
+                        self._poll_scope(dev)
+                        dev.meta["error"] = ""
+                    except Exception as exc:  # noqa: BLE001
+                        dev.meta["error"] = str(exc)
                 else:
                     try:
                         v, i, p = dev.driver.measure()
@@ -748,6 +817,59 @@ class Bench:
                             nxt += step
                         rec["next_t"] = nxt
 
+    def _poll_scope(self, dev: Dev) -> None:
+        """示波器轮询: 每轮抓波形, 测量读数按通道交替刷新 (设备逐条测量约 0.2s/项)。"""
+        drv = dev.driver
+        wave = dev.state.setdefault("wave", {})
+        for ch in (1, 2):
+            if not dev.channels[ch].get("on"):
+                wave.pop(ch, None)
+                continue
+            try:
+                wave[ch] = drv.waveform(ch)
+            except Exception:  # noqa: BLE001
+                wave.pop(ch, None)
+        self._scope_tick += 1
+        ch = 1 if self._scope_tick % 2 else 2
+        if dev.channels[ch].get("on"):
+            try:
+                dev.channels[ch].update(drv.measure(ch))
+            except Exception:  # noqa: BLE001
+                pass
+        dev.state["run"] = bool(getattr(drv, "running", True))
+
+    def scope_action(self, dev_id: str, action: str) -> dict:
+        """示波器操作: run / stop / single / auto / ch1 / ch2 (通道开关)。"""
+        with self.lock:
+            dev = self.get_dev(dev_id)
+            if dev.role != "scope":
+                raise InstrumentError("该设备不是示波器")
+            if dev.driver is None:
+                raise InstrumentError(f"{dev.name} 未连接")
+            drv = dev.driver
+            if action == "run":
+                drv.run()
+                self.log("info", f"{dev.name} 开始采集")
+            elif action == "stop":
+                drv.stop()
+                self.log("info", f"{dev.name} 停止采集")
+            elif action == "single":
+                drv.single()
+                self.log("info", f"{dev.name} 单次触发")
+            elif action == "auto":
+                self.log("info", f"{dev.name} 自动设置 (Auto Setup)…")
+                drv.autoscale()
+            elif action in ("ch1", "ch2"):
+                ch = int(action[-1])
+                on = not bool(dev.channels[ch].get("on"))
+                drv.set_channel(ch, on)
+                dev.channels[ch]["on"] = on
+                self.log("info", f"{dev.name} CH{ch} {'开启' if on else '关闭'}")
+            else:
+                raise InstrumentError(f"未知示波器操作: {action}")
+            dev.state["run"] = bool(getattr(drv, "running", True))
+            return self.snapshot()
+
     def _safety_check(self) -> None:
         """软件保护: 负载功率/电源电流越限自动脱扣。"""
         if not self.limits.get("auto_trip"):
@@ -760,7 +882,7 @@ class Bench:
                 if dev.driver is not None and dev.state["on"] and dev.state["p"] > lim_p:
                     trip = True
                     self.log("error", f"{dev.name} 功率 {dev.state['p']:.1f}W 超过上限 {lim_p}W, 已自动脱扣")
-            else:
+            elif dev.role == "power":
                 for ch in (1, 2, 3):
                     if dev.channels[ch]["on"] and dev.channels[ch]["i"] > lim_i * 1.02:
                         trip = True
@@ -1015,6 +1137,8 @@ class Bench:
         with self.lock:
             dev = self.get_dev(dev_id)
             role = dev.role
+            if role == "scope":
+                raise InstrumentError("示波器暂不支持记录导出（波形可截图/后续版本补充）")
             chans: list = []
             rec_outs: list = []
             if role == "power":
@@ -1286,6 +1410,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(BENCH.load_set(body["dev"], body["mode"], float(body["value"])))
             if path == "/api/load/input":
                 return self._json(BENCH.load_input(body["dev"], bool(body["on"])))
+            if path == "/api/scope/action":
+                return self._json(BENCH.scope_action(body["dev"], str(body.get("action", ""))))
             if path == "/api/estop":
                 return self._json(BENCH.estop())
             if path == "/api/instrument/add":

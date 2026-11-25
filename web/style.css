@@ -1163,3 +1163,48 @@ html.light .occupy-tag { background: #fdf3df; border-color: #e5cd96; color: #a06
 #dir-mask { z-index: 220; }
 /* tiny 按钮防 flex 压缩导致文字溢出 */
 button.tiny { flex: 0 0 auto; white-space: nowrap; }
+
+/* ============================================================
+   示波器面板
+   ============================================================ */
+.scope-meas {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px; margin: 14px 0 12px;
+}
+.scope-ch {
+  display: flex; flex-direction: column; gap: 8px;
+  height: auto;                      /* 覆盖全局 button 的 30px 固定高度 */
+  padding: 12px 14px; text-align: left; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 12px; color: var(--text);
+  transition: border-color .12s, background .12s, opacity .12s;
+}
+.scope-ch:hover:not(:disabled) { background: var(--panel-3); border-color: var(--line-hi); }
+.scope-ch.on, .scope-ch.on:hover:not(:disabled) { border-color: var(--acc-line); background: var(--acc-dim); }
+.scope-ch.off { opacity: .5; }
+.scope-ch-name {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--text-2);
+}
+.scope-ch-name i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.scope-ch-vals { display: flex; gap: 20px; align-items: baseline; }
+.scope-ch-vals > span { display: flex; flex-direction: column; gap: 2px; }
+.scope-ch-vals b {
+  font-family: var(--mono); font-size: 16px; font-weight: 600; color: var(--text-hi);
+}
+.scope-ch-vals em {
+  font-style: normal; font-size: 10px; letter-spacing: .06em; color: var(--dim-2);
+}
+.scope-wave {
+  position: relative; height: 380px; padding: 6px;
+  background: var(--inset); border: 1px solid var(--cell-line);
+  border-radius: 12px; overflow: hidden;
+}
+.scope-canvas { display: block; width: 100%; height: 100%; }
+.scope-empty {
+  position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; color: var(--dim-2); font-size: 13px; pointer-events: none;
+}
+.view-head .tiny.sel {
+  background: var(--acc-dim); border-color: var(--acc-line); color: var(--acc-text);
+}

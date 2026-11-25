@@ -18,3 +18,12 @@ tools/crop_*.png
 
 # 程序目录下导出的记录数据
 /*.csv
+
+# 安装包产物 (体积大, 不入库; 走 GitHub Release)
+Output/
+*.spec
+*.bak
+
+# 示波器验证截图
+tools/scope_*.png
+tools/final_*.png

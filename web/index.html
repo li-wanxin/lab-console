@@ -55,13 +55,13 @@
         <select id="dev-model"></select>
       </label>
 
-      <label class="field">
+      <label class="field" id="port-field">
         <span>串口</span>
         <select id="dev-port"></select>
       </label>
 
       <div class="row">
-        <label class="field" style="margin:0">
+        <label class="field" id="baud-field" style="margin:0">
           <span>波特率</span>
           <select id="dev-baud"></select>
         </label>
@@ -75,7 +75,7 @@
         <input type="checkbox" id="sim-mode">
         <span>模拟模式（无硬件演示）</span>
       </label>
-      <label class="check">
+      <label class="check" id="safe-start-field">
         <input type="checkbox" id="safe-start" checked>
         <span>连接后先关断输出</span>
       </label>

@@ -44,7 +44,30 @@ MODELS["load"]["IT8512"] = {
 
 **新角色** (如万用表/示波器, 非 power/load): 除注册 MODELS 外, 还需
 ① `Dev`/`Bench` 的采样与快照分支; ② `recording.rec_columns` 补列定义;
-③ 前端 `ROLE_PANELS` 注册面板三件套。当前两种角色的分支即模板。
+③ 前端 `ROLE_PANELS` 注册面板三件套。当前三种角色的分支即模板。
+
+### 非串口传输 (USB USBTMC, 以示波器为例)
+
+示波器 `scope` 角色是本项目第一台**不走串口**的仪器, 已落地的做法可直接照搬:
+
+- `MODELS["scope"]["DSOX1102G"]` 带 `"transport": "usbtmc"`, `baud_rates: [0]`;
+- 传输层 `UsbTmcTransport` 与 `SerialTransport` 同构 (`write/query/query_raw/close`),
+  驱动内部只认这个接口 → 换传输不影响业务层;
+- `open(port, baud)` 里 `port` 复用为 `"USB"` / `"2A8D:1797"` (VID:PID), 波特率忽略;
+- **Windows 前置条件**: 1000X 系列只有 USB 设备口, 系统不带 USBTMC 驱动,
+  必须把设备接口绑定 WinUSB (`Zadig` 一次性操作)。绑 WinUSB 与 Keysight
+  IO Libraries 互斥 —— 装了官方库的机器上 libusb 打不开设备, 二者只能选一。
+- 波形读取: `:WAVeform:FORMat BYTE` + `POINts` + `:WAVeform:DATA?` (IEEE488.2 块),
+  电压 = `(原始字节 - yreference) * yincrement + yorigin` (**漏掉 yreference 会整体偏移**)。
+- REQUEST_DEV_DEP_MSG_IN 的 TransferSize 用 64KB; 请求 1MB 会被设备当作 0 长度空响应。
+- 降采样必须按桶取 min/max 包络, 简单抽点会让高频噪声产生混叠假象。
+
+## 升级路径 (v0.0.8 起)
+
+- 安装版 = **onedir** 目录式打包 (`dist\LabConsole\` → `{app}`), 启动不再解压临时目录,
+  避免单文件包首次启动被杀软首扫打断 ("Failed to load Python DLL")。
+- 便携版仍为 onefile 单文件。
+- PyInstaller 打包示波器功能需带 `--collect-all libusb_package` (内置 libusb-1.0.dll)。
 
 ## 新增仪器 (前端)
 

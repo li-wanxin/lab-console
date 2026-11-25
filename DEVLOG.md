@@ -217,3 +217,27 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 - **视觉验收优先于数值指标**：改完 UI 必须实际截图确认，用户对可见瑕疵零容忍，习惯用截图标注问题区域反馈，回复时描述要能落到具体位置。
 - 中文沟通；用户会口述需求（口语化），实现前先复述关键语义（尤其状态机类需求）以免理解偏差。
 - 界面改动后必须递增 `?v=N` 并用探针/截图双重验证后再交付。
+
+## 示波器接入 (2026-11-25, v0.0.9 待发布)
+
+**硬件**: Keysight DSOX1102G (VID 0x2A8D / PID 0x1797, SN CN57136249)。
+1000X 系列**只有 USB 设备口 (USBTMC), 没有网口** —— 数据手册确认 LAN 是 1200X/3000T 才有。
+
+**驱动前提**: Windows 不带 USBTMC 驱动, 必须用 Zadig 把设备接口绑定 WinUSB (一次性)。
+绑 WinUSB 与 Keysight IO Libraries 互斥 (本机 IO 库为残留空壳, 无损失)。
+
+**实现**:
+- `instruments.py` 新增 `UsbTmcTransport` (自研 USBTMC 1.0, 不依赖 python-usbtmc) +
+  `DSOX1102G` 驱动 + `SimScope`; `MODELS["scope"]` 注册 `transport: usbtmc`。
+- `app.py`: Dev/Bench 增加 scope 分支 (采样/快照/`_poll_scope`/`scope_action`),
+  默认清单加一台示波器; `/api/scope/action` 支持 run/stop/single/auto/ch1/ch2。
+- 前端 `ROLE_PANELS.scope`: 通道读数卡 (Vpp/Vavg/Hz) + Canvas 实时波形 + RUN/STOP/Auto,
+  USB 设备自动隐藏串口/波特率/关断输出等串口专属控件。
+
+**实测踩坑 (务必保留)**:
+1. USBTMC 写头 TransferSize 必须是**不含 4 字节对齐填充**的实际长度, 否则设备把 `\0` 当命令;
+2. REQUEST_DEV_DEP_MSG_IN 的 TransferSize 用 1MB → 设备返回 0 长度空响应; 64KB 正常;
+3. BYTE 波形解码必须是 `(原始值 - yreference) * yincrement + yorigin`, 漏 yreference 会整体偏移约 9.5V;
+4. 上一会话未读的大响应 (如截图) 会污染下一次 `*IDN?` → 连接时 `*CLS` + 冲洗 + 校验重试;
+5. 降采样按桶取 min/max 包络, 简单抽点会让噪声产生混叠假毛刺;
+6. 单帧波形约 200–400ms, 每项自动测量约 200ms (设备内部耗时), 实测刷新 1–2 Hz。

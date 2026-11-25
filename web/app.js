@@ -732,6 +732,9 @@ function devEntryHtml(d) {
     const ch = (d.channels && Object.keys(d.channels).length) || 3;
     spec = `${ch}通道 · 30V/3A`;
     tip = `${ch} 通道直流电源 · CH1/CH2 30V/3A · CH3 5V/3A`;
+  } else if (d.role === 'scope') {
+    spec = '2通道 · 100MHz · USB';
+    tip = '双通道数字示波器 · USB (USBTMC) 直连 · 需已绑定 WinUSB 驱动';
   } else if (d.range) {
     spec = `${d.range.max_v}V ${d.range.max_i}A ${d.range.max_p}W`;
     tip = `直流电子负载 · 量程 ${d.range.max_v}V / ${d.range.max_i}A / ${d.range.max_p}W · CC/CV/CR/CW`;
@@ -739,7 +742,7 @@ function devEntryHtml(d) {
     spec = ''; tip = '';
   }
   return `<button type="button" class="dev" data-dev="${d.id}" data-role="${d.role}" draggable="true" title="${tip}<br>点击打开视图，拖动可调整顺序">
-    <span class="dev-ico">${d.role === 'power' ? 'P' : 'L'}</span>
+    <span class="dev-ico">${d.role === 'power' ? 'P' : (d.role === 'scope' ? 'S' : 'L')}</span>
     <span class="dev-txt">
       <b><span class="dev-name">${escapeHtml(d.name)}</span><i class="dev-model">${d.model}</i></b>
       <em>${spec}</em>
@@ -884,6 +887,19 @@ function setView(id) {
     $('#cfg-title').textContent = `${dev.name} · ${dev.model} · 连接设置`;
     const mf = $('#dev-model-field');
     mf.style.display = dev.role === 'load' ? '' : 'none';
+    // 示波器走 USB, 没有串口/波特率可选项
+    const isUsb = dev.role === 'scope';
+    const pf = $('#port-field');
+    const bf = $('#baud-field');
+    const sf = $('#safe-start-field');
+    if (pf) pf.style.display = isUsb ? 'none' : '';
+    if (bf) bf.style.display = isUsb ? 'none' : '';
+    if (sf) sf.style.display = isUsb ? 'none' : '';
+    // 串口相关提示与刷新按钮对 USB 示波器无意义
+    const hint = $('#ttl-hint');
+    const rp = $('#refresh-ports');
+    if (hint) hint.style.display = isUsb ? 'none' : '';
+    if (rp) rp.style.display = isUsb ? 'none' : '';
     if (dev.role === 'load') {
       const sel = $('#dev-model');
       sel.innerHTML = ((STATUS.models || {}).load || []).map(m => `<option>${m}</option>`).join('');
@@ -1076,6 +1092,7 @@ let panelStamp = '';
 const ROLE_PANELS = {
   power: { html: powerPanelHtml, render: renderPowerPanel, curves: renderPowerCurves },
   load:  { html: loadPanelHtml,  render: renderLoadPanel,  curves: renderLoadCurves },
+  scope: { html: scopePanelHtml, render: renderScopePanel, curves: renderScopeCurves },
 };
 
 function ensurePanels(st) {
@@ -1095,6 +1112,11 @@ function ensurePanels(st) {
       sec.dataset.view = d.id;
       sec.id = 'view-' + d.id;
       sec.innerHTML = `<div class="panel vpanel">${spec ? spec.html(d) : ''}</div>`;
+      if (d.role === 'scope') {
+        sec.querySelectorAll('[data-sact]').forEach(btn => {
+          btn.onclick = () => scopeAction(d.id, btn.dataset.sact);
+        });
+      }
       $('main').appendChild(sec);
     } else {
       const tag = $('.view-head .model', sec);
@@ -1246,6 +1268,216 @@ function syncLoadPanelMode(sec, d, send) {
 /* ------------------------------------------------------------------ */
 /* 渲染：曲线 / 数据表（按设备）                                       */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* 渲染：示波器面板                                                    */
+/* ------------------------------------------------------------------ */
+const SCOPE_CH = {
+  1: { color: '#4f9cf9', name: 'CH1' },
+  2: { color: '#f0a83c', name: 'CH2' },
+};
+
+function fmtScopeV(v) {
+  if (v == null || !isFinite(v)) return '—';
+  const a = Math.abs(v);
+  if (a && a < 0.001) return (v * 1e6).toFixed(1) + 'µV';
+  if (a < 1) return (v * 1e3).toFixed(2) + 'mV';
+  return v.toFixed(3) + 'V';
+}
+
+function fmtScopeFreq(f) {
+  if (f == null || !isFinite(f) || f <= 0) return '—';
+  if (f >= 1e6) return (f / 1e6).toFixed(2) + 'M';
+  if (f >= 1e3) return (f / 1e3).toFixed(2) + 'k';
+  return f.toFixed(2);
+}
+
+function scopePanelHtml(d) {
+  return `
+      <div class="view-head">
+        <h2>示波器 <span class="model">${d.model}</span></h2>
+        <span class="badge dev-idn">未连接</span>
+        <div class="spacer"></div>
+        <button class="tiny" data-sact="run" title="开始采集">RUN</button>
+        <button class="tiny" data-sact="stop" title="停止采集">STOP</button>
+        <button class="tiny ghost" data-sact="auto" title="自动设置量程与时基">Auto</button>
+      </div>
+
+      <div class="scope-meas">
+        ${[1, 2].map(ch => `
+        <button type="button" class="scope-ch" data-sact="ch${ch}" data-ch="${ch}"
+                title="点击开关 CH${ch} 显示">
+          <span class="scope-ch-name"><i style="background:${SCOPE_CH[ch].color}"></i>CH${ch}</span>
+          <span class="scope-ch-vals">
+            <span><b class="vpp">—</b><em>Vpp</em></span>
+            <span><b class="vavg">—</b><em>Vavg</em></span>
+            <span><b class="freq">—</b><em>Hz</em></span>
+          </span>
+        </button>`).join('')}
+      </div>
+
+      <div class="scope-wave">
+        <canvas class="scope-canvas"></canvas>
+        <div class="scope-empty">未连接 · 左侧选择「USB 直连」后点连接</div>
+      </div>
+
+      <p class="hint" style="margin:10px 0 0">
+        波形逐帧从设备抓取（约 1–2 Hz），读数取自示波器自动测量；点击通道卡片可开关显示。
+      </p>`;
+}
+
+function renderScopePanel(st, d) {
+  const sec = $('#view-' + d.id);
+  if (!sec) return;
+  const idn = $('.dev-idn', sec);
+  if (idn) {
+    idn.textContent = d.connected
+      ? (d.idn ? String(d.idn).split(',').slice(0, 2).join(' ') : '已连接')
+      : (d.error ? '通信异常' : '未连接');
+    idn.className = 'badge dev-idn' + (d.error ? ' warn' : (d.connected ? ' ok' : ''));
+    idn.title = d.idn || d.error || '';
+  }
+  [1, 2].forEach(ch => {
+    const card = $(`.scope-ch[data-ch="${ch}"]`, sec);
+    if (!card) return;
+    const c = (d.channels || {})[ch] || {};
+    const on = !!c.on && !!d.connected;
+    card.classList.toggle('on', on);
+    card.classList.toggle('off', !on);
+    const vpp = card.querySelector('.vpp');
+    const vavg = card.querySelector('.vavg');
+    const fr = card.querySelector('.freq');
+    if (vpp) vpp.textContent = on ? fmtScopeV(c.vpp) : '—';
+    if (vavg) vavg.textContent = on ? fmtScopeV(c.vavg) : '—';
+    if (fr) fr.textContent = on ? fmtScopeFreq(c.freq) : '—';
+  });
+  const runBtn = $('[data-sact="run"]', sec);
+  const stopBtn = $('[data-sact="stop"]', sec);
+  if (runBtn) runBtn.classList.toggle('sel', !!d.run && d.connected);
+  if (stopBtn) stopBtn.classList.toggle('sel', !!d.connected && !d.run);
+}
+
+function renderScopeCurves(st) {
+  const d = curDev();
+  if (!d || d.role !== 'scope') return;
+  drawScope(d);
+}
+
+function drawScope(d) {
+  const sec = $('#view-' + d.id);
+  if (!sec) return;
+  const cv = $('.scope-canvas', sec);
+  if (!cv) return;
+  const wrap = cv.parentElement;
+  const empty = $('.scope-empty', sec);
+  if (empty) empty.style.display = d.connected ? 'none' : '';
+
+  const rect = wrap.getBoundingClientRect();
+  const W = Math.max(320, Math.floor(rect.width));
+  const H = Math.max(220, Math.floor(rect.height));
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    cv.style.width = W + 'px';
+    cv.style.height = H + 'px';
+  }
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+
+  const css = getComputedStyle(document.documentElement);
+  const cGrid = css.getPropertyValue('--line-hi').trim() || '#2e4055';
+  const cText = css.getPropertyValue('--dim-1').trim() || '#a7b7c8';
+
+  const padL = 62, padR = 16, padT = 14, padB = 30;
+  const pw = W - padL - padR;
+  const ph = H - padT - padB;
+
+  g.strokeStyle = cGrid;
+  g.globalAlpha = 0.55;
+  g.lineWidth = 1;
+  for (let i = 0; i <= 10; i++) {
+    const x = Math.round(padL + pw * i / 10) + 0.5;
+    g.beginPath(); g.moveTo(x, padT); g.lineTo(x, padT + ph); g.stroke();
+  }
+  for (let j = 0; j <= 8; j++) {
+    const y = Math.round(padT + ph * j / 8) + 0.5;
+    g.beginPath(); g.moveTo(padL, y); g.lineTo(padL + pw, y); g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  const wave = d.wave || {};
+  const chs = [1, 2].filter(ch => wave['ch' + ch] && wave['ch' + ch].y && wave['ch' + ch].y.length > 1);
+  g.font = '12px var(--mono)';
+  g.textAlign = 'center';
+  g.fillStyle = cText;
+  if (!chs.length) {
+    g.font = '13px var(--sans)';
+    g.fillText(d.connected ? (d.run ? '等待波形数据…' : '已停止采集（点 RUN 继续）') : '未连接', padL + pw / 2, padT + ph / 2);
+    return;
+  }
+
+  let lo = Infinity, hi = -Infinity;
+  chs.forEach(ch => {
+    for (const v of wave['ch' + ch].y) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  });
+  let span = hi - lo;
+  if (!isFinite(span) || span < 1e-9) { span = 1; lo -= 0.5; hi += 0.5; }
+  const margin = span * 0.1;
+  lo -= margin; hi += margin; span = hi - lo;
+
+  chs.forEach(ch => {
+    const w = wave['ch' + ch];
+    const ys = w.y;
+    g.strokeStyle = SCOPE_CH[ch].color;
+    g.lineWidth = 1.5;
+    g.beginPath();
+    for (let i = 0; i < ys.length; i++) {
+      const x = padL + pw * (i / (ys.length - 1));
+      const y = padT + ph * (1 - (ys[i] - lo) / span);
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.stroke();
+  });
+
+  // 纵轴 (V) 与横轴 (时间) 刻度
+  g.fillStyle = cText;
+  g.font = '11px var(--mono)';
+  g.textAlign = 'right';
+  for (let j = 0; j <= 8; j += 2) {
+    const v = hi - span * j / 8;
+    g.fillText(fmtScopeV(v), padL - 8, padT + ph * j / 8 + 4);
+  }
+  g.textAlign = 'center';
+  const w0 = wave['ch' + chs[0]];
+  const startMs = (w0.x0 || 0) * 1000;
+  const totalMs = w0.dx * Math.max(1, w0.y.length - 1) * 1000;
+  const fmtT = ms => (Math.abs(ms) >= 1000 ? (ms / 1000).toFixed(2) + 's' : ms.toFixed(1) + 'ms');
+  for (let i = 0; i <= 10; i += 2) {
+    g.fillText(fmtT(startMs + totalMs * i / 10), padL + pw * i / 10, padT + ph + 18);
+  }
+
+  // 图例
+  g.textAlign = 'left';
+  let lx = padL + 6;
+  chs.forEach(ch => {
+    g.fillStyle = SCOPE_CH[ch].color;
+    g.fillRect(lx, padT + 4, 10, 3);
+    g.fillStyle = cText;
+    g.fillText(' ' + SCOPE_CH[ch].name, lx + 12, padT + 8);
+    lx += 52;
+  });
+}
+
+async function scopeAction(devId, action) {
+  try {
+    const r = await api('/api/scope/action', { dev: devId, action });
+    render(r);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 function renderCurves(st) {
   const dev = curDev();
   if (!dev) return;
@@ -2363,8 +2595,9 @@ function bind() {
     const dev = curDev();
     if (!dev) return;
     const cfg = S.cfg[dev.id] || (S.cfg[dev.id] = { port: '', baud: 0 });
-    const port = $('#dev-port').value || cfg.port;
-    const baud = parseInt($('#dev-baud').value, 10) || 0;
+    const isUsb = dev.role === 'scope';
+    const port = isUsb ? 'USB' : ($('#dev-port').value || cfg.port);
+    const baud = isUsb ? 0 : (parseInt($('#dev-baud').value, 10) || 0);
     if (!port && !$('#sim-mode').checked) return toast('请选择串口，或勾选模拟模式', true);
     try {
       await api('/api/connect', {
