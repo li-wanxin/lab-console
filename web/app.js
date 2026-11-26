@@ -1315,7 +1315,7 @@ function scopePanelHtml(d) {
         <div class="spacer"></div>
         <button class="tiny" data-sact="run" title="开始采集">RUN</button>
         <button class="tiny" data-sact="stop" title="停止采集">STOP</button>
-        <button class="tiny ghost" data-sact="fit" title="纵轴按波形幅度自动适配（关闭则严格按仪器档位显示）">自适应</button>
+        <button class="tiny ghost" data-sact="fit" title="纵轴放大：按本帧幅度铺满屏幕（默认关闭，此时严格按仪器 V/div 与偏置显示，与示波器面板一致）">自适应</button>
         <select class="tiny-select" data-srate title="回读频率：越高越流畅，但对仪器自身屏幕的干扰越大">
           <option value="fast">快</option>
           <option value="mid">标准</option>
@@ -1354,6 +1354,9 @@ function scopePanelHtml(d) {
       </div>
 
       <p class="hint" style="margin:10px 0 0">
+        栅格与示波器面板一一对应：横 10 格 = 时基 ×10，竖 8 格 = 每通道 V/div ×8，
+        中间十字是触发点与 0V 基准，纵轴默认直接使用仪器的 V/div 与偏置，
+        因此波形的幅度、位置与面板完全一致；信号太小时可点「自适应」放大本机显示。
         波形逐帧从设备回读：仪器每次取数都要等一次新采集，采集窗口越长越慢 ——
         实测 200µs/div 约 6–9 帧/秒，10ms/div 约 3.5，20ms/div 约 2.6。
         「回读采样」是 USB 实际拿到的点间隔（点数模式 MAXimum，运行中约 6 万点），
@@ -1394,7 +1397,7 @@ function renderScopePanel(st, d) {
 
   // 底部信息条: 采集状态 / 时基 / 触发电平 / 帧率
   const sc = d.scope || {};
-  const fitOn = S.scopeFit !== false;
+  const fitOn = S.scopeFit === true;
   const fitBtn = $('[data-sact="fit"]', sec);
   if (fitBtn) fitBtn.classList.toggle('sel', fitOn);
   const rateSel = $('[data-srate]', sec);
@@ -1525,14 +1528,18 @@ function drawScope(d) {
     return;
   }
 
-  // 自适应: 按本帧数据幅度重算每格电压, 让波形铺满 8 格 (默认开)
-  const fit = S.scopeFit !== false;
+  // 纵轴默认严格跟随仪器 (V/div 与偏置直接取 :CHANnel<n>:SCALe?/OFFSet?),
+  // 这样每一格代表的电压、0V 线的位置都与示波器面板完全一致;
+  // 信号很小时可手动开「自适应」放大, 仅影响本机显示, 不改变仪器设置。
+  const fitUser = S.scopeFit === true;
   const view = {};
   chs.forEach(ch => {
     const w = wave['ch' + ch];
     const ys = w.y;
     let vdiv = w.vdiv > 0 ? w.vdiv : 0;
     let off = w.off || 0;
+    let fit = fitUser;
+    if (!vdiv && ys.length) fit = true;      // 没读到仪器档位时兜底自适应
     if (fit && ys.length) {
       // 用 0.5%–99.5% 分位定幅: 单个毛刺不会把整体压扁, 极值仍会被裁到边缘
       const sorted = ys.slice().sort((a, b) => a - b);
@@ -1542,7 +1549,7 @@ function drawScope(d) {
       vdiv = span / (ROWS * 0.9);         // 留一点上下余量
       off = (hi + lo) / 2;
     }
-    view[ch] = { y: ys, x0: w.x0 || 0, dx: w.dx || 0, vdiv, off };
+    view[ch] = { y: ys, x0: w.x0 || 0, dx: w.dx || 0, vdiv, off, fit };
   });
 
   // ---- 纵轴刻度: 左 = CH1, 右 = CH2 (各自独立 v/div) ----
@@ -1550,6 +1557,9 @@ function drawScope(d) {
     { ch: 1, side: 'left' },
     { ch: 2, side: 'right' },
   ];
+  // 每格都标 (格高够时), 数值 = 该网格线对应的电压, 与仪器面板的格线一一对应
+  const axStep = chh >= 24 ? 1 : 2;
+  const zeroMarks = [];
   axes.forEach(ax => {
     const vw = view[ax.ch];
     if (!vw) return;
@@ -1559,32 +1569,39 @@ function drawScope(d) {
     g.globalAlpha = 0.85;
     g.textAlign = ax.side === 'left' ? 'right' : 'left';
     const lx = ax.side === 'left' ? padL - 8 : padL + pw + 8;
-    for (let j = 0; j <= ROWS; j += 2) {
+    for (let j = 0; j <= ROWS; j += axStep) {
       const v = vw.off + (ROWS / 2 - j) * vdiv;
       g.fillText(fmtDivV(v), lx, padT + chh * j + 4);
     }
     g.globalAlpha = 1;
-    // 0V(通道偏置) 位置色标
+    // 0V(通道偏置) 位置色标: 画在绘图区内侧, 波形之后补画, 免得被波形盖住
     const zd = py((0 - vw.off) / vdiv);
     if (zd > padT - 1 && zd < padT + ph + 1) {
-      g.beginPath();
-      const ax0 = ax.side === 'left' ? padL : padL + pw;
-      const dir = ax.side === 'left' ? -1 : 1;
-      g.moveTo(ax0, zd);
-      g.lineTo(ax0 + dir * 5, zd - 4);
-      g.lineTo(ax0 + dir * 5, zd + 4);
-      g.closePath();
-      g.fill();
+      zeroMarks.push({ side: ax.side, zd, color: SCOPE_CH[ax.ch].color });
     }
   });
 
-  // ---- 横轴时间刻度 (相对触发点) ----
-  g.fillStyle = cText2;
-  g.textAlign = 'center';
-  for (let i = 0; i <= COLS; i += 2) {
-    if (!tdiv) break;
-    const t = (i - COLS / 2) * tdiv;
-    g.fillText(fmtTime(t), padL + cw * i, padT + ph + 16);
+  // ---- 横轴时间刻度 (与仪器一致: 10 格横轴, 中间为触发点 0s) ----
+  if (tdiv) {
+    g.font = '11px "JetBrains Mono", Consolas, monospace';
+    const allDiv = cw >= 46;          // 格宽够就每格都标, 否则隔一格标 (但保留 0)
+    for (let i = 0; i <= COLS; i++) {
+      const isZero = (i === COLS / 2);
+      if (!allDiv && i % 2 !== 0 && !isZero) continue;
+      const t = (i - COLS / 2) * tdiv;
+      g.fillStyle = isZero ? cText : cText2;
+      g.textAlign = 'center';
+      g.fillText(isZero ? '0s' : fmtTime(t), padL + cw * i, padT + ph + 16);
+    }
+    // 触发点标记 (仪器顶部的小 T 标记)
+    g.fillStyle = cText2;
+    g.beginPath();
+    const tx = px(0);
+    g.moveTo(tx - 4, padT + 0.5);
+    g.lineTo(tx + 4, padT + 0.5);
+    g.lineTo(tx, padT + 6.5);
+    g.closePath();
+    g.fill();
   }
 
   // ---- 波形 (按各自 v/div 与偏置换算成格数, 与真机一致) ----
@@ -1627,6 +1644,19 @@ function drawScope(d) {
   }
   g.restore();
 
+  // 0V 色标最后画, 保证不被波形盖住
+  zeroMarks.forEach(m => {
+    const ax0 = m.side === 'left' ? padL + 0.5 : padL + pw - 0.5;
+    const dir = m.side === 'left' ? 1 : -1;
+    g.fillStyle = m.color;
+    g.beginPath();
+    g.moveTo(ax0, m.zd);
+    g.lineTo(ax0 + dir * 7, m.zd - 4);
+    g.lineTo(ax0 + dir * 7, m.zd + 4);
+    g.closePath();
+    g.fill();
+  });
+
   // ---- 角落读数 (像真机的 HUD) ----
   g.textAlign = 'left';
   g.font = '11px "JetBrains Mono", Consolas, monospace';
@@ -1634,8 +1664,16 @@ function drawScope(d) {
   chs.forEach(ch => {
     const vw = view[ch];
     g.fillStyle = SCOPE_CH[ch].color;
-    g.fillText(`${SCOPE_CH[ch].name} ${fmtDivV(vw.vdiv || 0)}/div${fit ? ' *' : ''}`, hx, padT - 7);
-    hx += 122;
+    // 跟随仪器时顺带给出波形占几格 —— 与面板上看到的高度一致, 也解释为什么线这么平
+    let tag = vw.fit ? ' 适配' : '';
+    if (!vw.fit && vw.vdiv > 0 && vw.y.length) {
+      let lo2 = Infinity, hi2 = -Infinity;
+      for (const v of vw.y) { if (v < lo2) lo2 = v; if (v > hi2) hi2 = v; }
+      const spanDiv = (hi2 - lo2) / vw.vdiv;
+      if (isFinite(spanDiv) && spanDiv > 0) tag += ` · ${spanDiv.toFixed(spanDiv < 10 ? 1 : 0)}格`;
+    }
+    g.fillText(`${SCOPE_CH[ch].name} ${fmtDivV(vw.vdiv || 0)}/div${tag}`, hx, padT - 7);
+    hx += 168;
   });
   g.fillStyle = cText2;
   g.textAlign = 'right';
@@ -1647,10 +1685,10 @@ function drawScope(d) {
 
 async function scopeAction(devId, action) {
   if (action === 'fit') {
-    S.scopeFit = !(S.scopeFit !== false);
+    S.scopeFit = !(S.scopeFit === true);
     const sec = $('#view-' + devId);
     const btn = sec && $('[data-sact="fit"]', sec);
-    if (btn) btn.classList.toggle('sel', S.scopeFit !== false);
+    if (btn) btn.classList.toggle('sel', S.scopeFit === true);
     const d = curDev();
     if (d) drawScope(d);
     return;
