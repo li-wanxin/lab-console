@@ -1187,6 +1187,11 @@ button.tiny { flex: 0 0 auto; white-space: nowrap; }
   font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--text-2);
 }
 .scope-ch-name i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+/* 通道色与示波器面板一致: CH1 黄 / CH2 绿 */
+.scope-ch-name i[data-ch="1"] { background: #ffd60a; }
+.scope-ch-name i[data-ch="2"] { background: #3ddc5b; }
+html.light .scope-ch-name i[data-ch="1"] { background: #a88000; }
+html.light .scope-ch-name i[data-ch="2"] { background: #127a3a; }
 .scope-ch-vals { display: flex; gap: 20px; align-items: baseline; }
 .scope-ch-vals > span { display: flex; flex-direction: column; gap: 2px; }
 .scope-ch-vals b {

@@ -1279,10 +1279,23 @@ function syncLoadPanelMode(sec, d, send) {
 /* ------------------------------------------------------------------ */
 /* 渲染：示波器面板                                                    */
 /* ------------------------------------------------------------------ */
-const SCOPE_CH = {
-  1: { color: '#4f9cf9', name: 'CH1' },
-  2: { color: '#f0a83c', name: 'CH2' },
+/* 通道配色与示波器面板一致: CH1 黄 / CH2 绿 (Keysight 1000X 出厂配色)。
+   深色底用高亮色, 浅色底换成同色系的深色版, 保证白底上也看得清。 */
+const SCOPE_CH_COLORS = {
+  dark: { 1: '#ffd60a', 2: '#3ddc5b' },
+  light: { 1: '#a88000', 2: '#127a3a' },
 };
+const SCOPE_CH = {
+  1: { color: SCOPE_CH_COLORS.dark[1], name: 'CH1' },
+  2: { color: SCOPE_CH_COLORS.dark[2], name: 'CH2' },
+};
+
+function applyScopeChColors() {
+  const light = document.documentElement.classList.contains('light');
+  const c = light ? SCOPE_CH_COLORS.light : SCOPE_CH_COLORS.dark;
+  SCOPE_CH[1].color = c[1];
+  SCOPE_CH[2].color = c[2];
+}
 
 function fmtScopeV(v) {
   if (v == null || !isFinite(v)) return '—';
@@ -1329,7 +1342,7 @@ function scopePanelHtml(d) {
         ${[1, 2].map(ch => `
         <button type="button" class="scope-ch" data-sact="ch${ch}" data-ch="${ch}"
                 title="点击开关 CH${ch} 显示">
-          <span class="scope-ch-name"><i style="background:${SCOPE_CH[ch].color}"></i>CH${ch}</span>
+          <span class="scope-ch-name"><i data-ch="${ch}"></i>CH${ch}</span>
           <span class="scope-ch-vals">
             <span><b class="vpp">—</b><em>Vpp</em></span>
             <span><b class="vavg">—</b><em>Vavg</em></span>
@@ -1465,6 +1478,7 @@ function drawScope(d) {
     cv.style.height = H + 'px';
   }
   const g = cv.getContext('2d');
+  applyScopeChColors();          // 画布颜色跟随当前主题 (深/浅底各一套)　
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
 
@@ -3142,6 +3156,7 @@ function toggleLog() {
 /* ---------------- 主题：深色 / 浅色 ---------------- */
 function applyTheme(t) {
   document.documentElement.classList.toggle('light', t === 'light');
+  applyScopeChColors();          // 画布用色随主题切换, 下一帧重绘即生效
   const b = $('#theme-toggle');
   if (b) b.textContent = t === 'light' ? '🌙 深色' : '☀️ 浅色';
 }
