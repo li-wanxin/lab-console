@@ -913,12 +913,13 @@ class Bench:
             dev.state["scales"] = sc
             view = dev.state.setdefault("wave_view", {})
             for c in (1, 2):
+                key = f"ch{c}"             # 前端按 ch1/ch2 取, 键名必须带前缀
                 if dev.channels[c].get("on"):
                     built = dev._build_wave_view(c)
                     if built:
-                        view[c] = built
+                        view[key] = built
                 else:
-                    view.pop(c, None)
+                    view.pop(key, None)
             dev.state["run"] = bool(getattr(drv, "running", True))
             dev.state["frame"] = int(dev.state.get("frame") or 0) + 1
             dev.state["frame_ms"] = round(dt * 1000, 1)
