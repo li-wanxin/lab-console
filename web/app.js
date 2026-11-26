@@ -1116,6 +1116,14 @@ function ensurePanels(st) {
         sec.querySelectorAll('[data-sact]').forEach(btn => {
           btn.onclick = () => scopeAction(d.id, btn.dataset.sact);
         });
+        const sel = $('[data-srate]', sec);
+        if (sel) {
+          sel.value = S.scopeRate || 'mid';
+          sel.onchange = () => {
+            S.scopeRate = sel.value;
+            scopeAction(d.id, 'rate:' + sel.value);
+          };
+        }
       }
       $('main').appendChild(sec);
     } else {
@@ -1308,6 +1316,12 @@ function scopePanelHtml(d) {
         <button class="tiny" data-sact="run" title="开始采集">RUN</button>
         <button class="tiny" data-sact="stop" title="停止采集">STOP</button>
         <button class="tiny ghost" data-sact="fit" title="纵轴按波形幅度自动适配（关闭则严格按仪器档位显示）">自适应</button>
+        <select class="tiny-select" data-srate title="回读频率：越高越流畅，但对仪器自身屏幕的干扰越大">
+          <option value="fast">快</option>
+          <option value="mid">标准</option>
+          <option value="slow">慢</option>
+          <option value="pause">暂停</option>
+        </select>
         <button class="tiny ghost" data-sact="auto" title="自动设置量程与时基">Auto</button>
       </div>
 
@@ -1382,9 +1396,14 @@ function renderScopePanel(st, d) {
   const fitOn = S.scopeFit !== false;
   const fitBtn = $('[data-sact="fit"]', sec);
   if (fitBtn) fitBtn.classList.toggle('sel', fitOn);
+  const rateSel = $('[data-srate]', sec);
+  if (rateSel && S.scopeRate && rateSel.value !== S.scopeRate) rateSel.value = S.scopeRate;
   const setTxt = (sel, txt) => { const el = $(sel, sec); if (el) el.textContent = txt; };
+  const rateMode = S.scopeRate || 'mid';
   setTxt('.sf-run', !d.connected ? '未连接'
-    : (d.run ? `RUN · ${(sc.fps || 0).toFixed(1)} 帧/秒` : 'STOP · 已冻结'));
+    : (rateMode === 'pause' ? '已暂停回读（仪器屏幕不受打扰）'
+      : (d.run ? `RUN · ${(sc.fps || 0).toFixed(1)} 帧/秒${rateMode === 'slow' ? ' · 慢档' : ''}`
+               : 'STOP · 已冻结')));
   setTxt('.sf-tdiv', sc.tdiv ? `时基 ${fmtTime(sc.tdiv)}/div` : '时基 —');
   setTxt('.sf-trig', (d.connected && isFinite(sc.trig)) ? `触发 ${fmtDivV(sc.trig)}` : '触发 —');
   const w1 = (d.wave || {})['ch1'], w2 = (d.wave || {})['ch2'];
@@ -2091,12 +2110,15 @@ async function manualCheckUpdate() {
 async function tick() {
   let delay = 700;
   try {
-    const st = await api('/api/status');
+    const dev0 = curDev();
+    const watching = dev0 && dev0.role === 'scope' && dev0.connected;
+    const st = await api(watching ? `/api/status?watch=${dev0.id}` : '/api/status');
     render(st);
     // 正在看运行中的示波器 → 高频拉取, 别让 700ms 的状态轮询成为刷新瓶颈
     const dev = curDev();
-    if (dev && dev.role === 'scope' && dev.connected && dev.run) {
-      delay = 100;
+    const rate = S.scopeRate || 'mid';
+    if (dev && dev.role === 'scope' && dev.connected && dev.run && rate !== 'pause') {
+      delay = rate === 'fast' ? 100 : (rate === 'slow' ? 300 : 150);
     }
   } catch (e) {
     console.warn(e);

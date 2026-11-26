@@ -1222,3 +1222,13 @@ button.tiny { flex: 0 0 auto; white-space: nowrap; }
 .view-head .tiny.sel {
   background: var(--acc-dim); border-color: var(--acc-line); color: var(--acc-text);
 }
+
+/* 示波器刷新档位下拉 */
+.tiny-select {
+  height: 26px; padding: 0 6px;
+  font-family: var(--mono); font-size: 11.5px;
+  color: var(--text-2); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 7px;
+  outline: none; cursor: pointer;
+}
+.tiny-select:hover { border-color: var(--line-hi); color: var(--text); }

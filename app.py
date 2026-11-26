@@ -315,6 +315,8 @@ class Bench:
                 dev.state["fps"] = 0.0
                 dev.state["meas_t"] = 0.0
                 dev.state["rot"] = 1
+                dev.state["frame_gap"] = dev.state.get("frame_gap") or 0.35
+                dev.state["watch_t"] = time.time()
                 try:
                     dev.state["scales"] = drv.scales()
                 except InstrumentError:
@@ -837,6 +839,12 @@ class Bench:
                             nxt += step
                         rec["next_t"] = nxt
 
+    def mark_watch(self, dev_id: str) -> None:
+        """前端在看的设备: 只有被看的示波器才持续采集, 否则暂停以免打扰仪器屏幕。"""
+        dev = self.devices.get(str(dev_id))
+        if dev is not None and dev.role == "scope":
+            dev.state["watch_t"] = time.time()
+
     def _scope_loop(self) -> None:
         """示波器采集循环: 能抓多快抓多快, 不做人为休眠。
 
@@ -866,6 +874,10 @@ class Bench:
     def _scope_poll(self, dev: Dev) -> None:
         drv = dev.driver
         now = time.time()
+        # 没人在看 (示波器页未激活) → 不读, 避免频繁打断仪器自身采集导致屏幕闪烁
+        if now - float(dev.state.get("watch_t") or 0) > 2.5:
+            time.sleep(0.25)
+            return
         t0 = time.perf_counter()
         with dev.io:
             sc = drv.scales()                 # 1–2ms/项, 每帧都取, 前面板改档立刻跟上
@@ -926,10 +938,16 @@ class Bench:
             dev.state["run"] = bool(getattr(drv, "running", True))
             dev.state["frame"] = int(dev.state.get("frame") or 0) + 1
             dev.state["frame_ms"] = round(dt * 1000, 1)
+            gap = float(dev.state.get("frame_gap") or 0.0)
             fps = 1.0 / dt
             prev = float(dev.state.get("fps") or 0.0)
             dev.state["fps"] = fps if prev <= 0 else prev * 0.65 + fps * 0.35
             dev.meta["error"] = ""
+        # 节流: 补足到设定周期, 降低对仪器自身采集/屏幕的打扰
+        if gap > 0:
+            remain = gap - (time.time() - now)
+            if remain > 0:
+                time.sleep(remain)
 
     def scope_action(self, dev_id: str, action: str) -> dict:
         """示波器操作: run / stop / single / auto / ch1 / ch2 (通道开关)。"""
@@ -955,6 +973,13 @@ class Bench:
                 self.log("info", f"{dev.name} 自动设置 (Auto Setup)…")
                 drv.autoscale()
                 self.log("info", f"{dev.name} 自动设置完成")
+            elif action.startswith("rate:"):
+                mode = action.split(":", 1)[1]
+                gaps = {"fast": 0.0, "mid": 0.35, "slow": 1.0, "pause": 86400.0}
+                if mode not in gaps:
+                    raise InstrumentError(f"未知刷新档位: {mode}")
+                dev.state["frame_gap"] = gaps[mode]
+                self.log("info", f"{dev.name} 采集节流: {mode}")
             elif action in ("ch1", "ch2"):
                 ch = int(action[-1])
                 on = not bool(dev.channels[ch].get("on"))
@@ -1437,6 +1462,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/api/status":
+            qs = parse_qs(urlparse(self.path).query)
+            watch = (qs.get("watch") or [""])[0].strip()
+            if watch:
+                BENCH.mark_watch(watch)
             return self._json(BENCH.snapshot())
         if path == "/api/ports":
             return self._json({"ports": list_serial_ports(), "has_serial": HAS_SERIAL})
