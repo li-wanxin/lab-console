@@ -107,7 +107,7 @@ class Dev:
             self.channels = {n: {"vpp": 0.0, "vavg": 0.0, "freq": 0.0, "on": n == 1}
                              for n in (1, 2)}
             self.range = None
-            self.state = {"run": True, "wave": {}, "fps": 0.0, "scales": {},
+            self.state = {"run": True, "wave": {}, "wave_view": {}, "fps": 0.0, "scales": {},
                           "rot": 1, "meas_t": 0.0}
         else:
             self.channels = None
@@ -122,7 +122,7 @@ class Dev:
         elif self.role == "scope":
             d["channels"] = self.channels
             d["run"] = self.state.get("run", True)
-            d["wave"] = self._wave_payload()
+            d["wave"] = dict(self.state.get("wave_view") or {})
             sc = self.state.get("scales") or {}
             d["scope"] = {
                 "tdiv": sc.get("tdiv", 0.0),
@@ -137,37 +137,34 @@ class Dev:
             d.update(self.state)
         return d
 
-    def _wave_payload(self, max_points: int = 1600) -> dict:
-        """把最近一帧波形降采样到 ≤max_points 点后交给前端绘图。
+    def _build_wave_view(self, ch: int) -> dict | None:
+        """把某通道最近一帧波形降采样成绘图数据 (采集线程内调用, 每帧一次)。
 
         每个桶取最小/最大两点（包络），而不是简单抽点——否则高频噪声
         在抽点后会产生混叠，画出来是一堆假毛刺。
         """
-        out = {}
-        per_ch = max(80, max_points // 2)
-        scales = (self.state.get("scales") or {}).get("ch") or {}
-        for ch, w in (self.state.get("wave") or {}).items():
-            ys = w.get("y") or []
-            if not ys:
-                continue
-            step = max(1, -(-len(ys) // per_ch))
-            pts: list[float] = []
-            for i in range(0, len(ys), step):
-                seg = ys[i:i + step]
-                lo, hi = min(seg), max(seg)
-                if seg.index(lo) <= seg.index(hi):
-                    pts.extend((lo, hi))
-                else:
-                    pts.extend((hi, lo))
-            meta = scales.get(ch) or scales.get(str(ch)) or {}
-            out[f"ch{ch}"] = {
-                "y": [round(float(v), 4) for v in pts],
-                "x0": w.get("x0", 0.0),
-                "dx": w.get("dx", 0.0) * step,
-                "vdiv": meta.get("vdiv", 0.0),
-                "off": meta.get("off", 0.0),
-            }
-        return out
+        w = (self.state.get("wave") or {}).get(ch)
+        ys = (w or {}).get("y") or []
+        if not ys:
+            return None
+        per_ch = 700
+        step = max(1, -(-len(ys) // per_ch))
+        pts: list[float] = []
+        for i in range(0, len(ys), step):
+            seg = ys[i:i + step]
+            lo, hi = min(seg), max(seg)
+            if seg.index(lo) <= seg.index(hi):
+                pts.extend((lo, hi))
+            else:
+                pts.extend((hi, lo))
+        meta = ((self.state.get("scales") or {}).get("ch") or {}).get(ch) or {}
+        return {
+            "y": [round(float(v), 4) for v in pts],
+            "x0": w.get("x0", 0.0),
+            "dx": w.get("dx", 0.0) * step,
+            "vdiv": meta.get("vdiv", 0.0),
+            "off": meta.get("off", 0.0),
+        }
 
     def sample(self) -> dict:
         """一条历史采样的本机数据。"""
@@ -914,6 +911,14 @@ class Bench:
                 if "vpp" not in (meas.get(ch) or {}):
                     dev.channels[ch]["vpp"] = max(ys) - min(ys)
             dev.state["scales"] = sc
+            view = dev.state.setdefault("wave_view", {})
+            for c in (1, 2):
+                if dev.channels[c].get("on"):
+                    built = dev._build_wave_view(c)
+                    if built:
+                        view[c] = built
+                else:
+                    view.pop(c, None)
             dev.state["run"] = bool(getattr(drv, "running", True))
             dev.state["frame"] = int(dev.state.get("frame") or 0) + 1
             dev.state["frame_ms"] = round(dt * 1000, 1)
