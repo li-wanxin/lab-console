@@ -128,6 +128,7 @@ class Dev:
                 "tdiv": sc.get("tdiv", 0.0),
                 "tpos": sc.get("tpos", 0.0),
                 "trig": sc.get("trig", 0.0),
+                "srate": sc.get("srate", 0.0),
                 "fps": round(float(self.state.get("fps", 0.0)), 1),
                 "frame": int(self.state.get("frame") or 0),
                 "frame_ms": self.state.get("frame_ms", 0),
@@ -161,7 +162,9 @@ class Dev:
         return {
             "y": [round(float(v), 4) for v in pts],
             "x0": w.get("x0", 0.0),
-            "dx": w.get("dx", 0.0) * step,
+            "dx": w.get("dx", 0.0) * step,      # 降采样后的点间隔 (绘图用)
+            "dx0": w.get("dx", 0.0),            # 原始点间隔 (换算采样率用)
+            "n0": len(ys),                      # 原始点数
             "vdiv": meta.get("vdiv", 0.0),
             "off": meta.get("off", 0.0),
         }

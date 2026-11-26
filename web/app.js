@@ -1284,6 +1284,14 @@ function fmtScopeV(v) {
   return v.toFixed(3) + 'V';
 }
 
+function fmtSaRate(v) {
+  if (!isFinite(v) || v <= 0) return '—';
+  if (v >= 1e9) return (v / 1e9).toFixed(2) + ' GSa/s';
+  if (v >= 1e6) return (v / 1e6).toFixed(v / 1e6 >= 10 ? 1 : 2) + ' MSa/s';
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + ' kSa/s';
+  return v.toFixed(0) + ' Sa/s';
+}
+
 function fmtScopeFreq(f) {
   if (f == null || !isFinite(f) || f <= 0 || f > 1e30) return '—';
   if (f >= 1e6) return (f / 1e6).toFixed(2) + 'M';
@@ -1328,13 +1336,14 @@ function scopePanelHtml(d) {
         <span class="sf-item sf-tdiv">时基 —</span>
         <span class="sf-item sf-trig">触发 —</span>
         <span class="spacer"></span>
-        <span class="sf-item sf-pts">—</span>
+        <span class="sf-item sf-rate">—</span>
       </div>
 
       <p class="hint" style="margin:10px 0 0">
-        波形逐帧从设备回读：仪器每次取数要等一次新采集（约 210ms，与点数无关），
-        因此双通道约 3.2 帧/秒、单通道约 3.7 帧/秒 —— 这是 USB 通路的物理上限，
-        仪器自身屏幕是内部直连，不经过这条通路。
+        波形逐帧从设备回读：仪器每次取数都要等一次新采集，采集窗口越长越慢 ——
+        实测 200µs/div 约 6–9 帧/秒，10ms/div 约 3.5，20ms/div 约 2.6。
+        「回读采样」是 USB 拿到的点间隔，仪器面板上的采样率是内部 ADC 速率，
+        两者相差约 500 倍（屏幕记录只有约 2000 点）。
       </p>`;
 }
 
@@ -1379,8 +1388,14 @@ function renderScopePanel(st, d) {
   setTxt('.sf-tdiv', sc.tdiv ? `时基 ${fmtTime(sc.tdiv)}/div` : '时基 —');
   setTxt('.sf-trig', (d.connected && isFinite(sc.trig)) ? `触发 ${fmtDivV(sc.trig)}` : '触发 —');
   const w1 = (d.wave || {})['ch1'], w2 = (d.wave || {})['ch2'];
-  const pts = Math.max(w1 ? w1.y.length : 0, w2 ? w2.y.length : 0);
-  setTxt('.sf-pts', (pts ? `显示 ${pts} 点 / 通道` : '') + (fitOn ? ' · 纵轴自适应' : ' · 按仪器档位'));
+  const wv = w1 || w2;
+  let rate = '采样 —';
+  if (wv && wv.dx0 > 0) {
+    const n0 = wv.n0 || wv.y.length;
+    rate = `回读采样 ${fmtSaRate(1 / wv.dx0)}（${n0} 点 / ${fmtTime(wv.dx0 * Math.max(1, n0 - 1))}）`;
+  }
+  if (sc.srate > 0) rate += ` · 仪器 ${fmtSaRate(sc.srate)}`;
+  setTxt('.sf-rate', rate);
 }
 
 function renderScopeCurves(st) {
@@ -1401,7 +1416,7 @@ function fmtTime(s) {
 /* 刻度标签: 每格电压值, 兼顾短标签与有效数字 */
 function fmtDivV(v) {
   const a = Math.abs(v);
-  if (a < 1e-12) return '0';
+  if (a < 1e-12) return '0V';
   if (a >= 1) return (Math.round(v * 100) / 100).toFixed(a >= 10 ? 1 : 2) + 'V';
   if (a >= 1e-3) return (v * 1e3).toFixed(Math.abs(v * 1e3) >= 100 ? 0 : (Math.abs(v * 1e3) >= 10 ? 1 : 2)) + 'mV';
   return (v * 1e6).toFixed(0) + 'µV';
@@ -1605,7 +1620,8 @@ function drawScope(d) {
   g.fillStyle = cText2;
   g.textAlign = 'right';
   const fps = sc.fps ? `${sc.fps.toFixed(1)} 帧/秒` : '';
-  g.fillText(fps, padL + pw, padT - 7);
+  const npts = (wave['ch' + chs[0]] && wave['ch' + chs[0]].n0) || 0;
+  g.fillText(fps + (npts ? ` · ${npts} 点` : ''), padL + pw, padT - 7);
 
 }
 

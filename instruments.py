@@ -854,7 +854,12 @@ class DSOX1102G:
         out = {"tdiv": tdiv,
                "tpos": parse_float(q(":TIMebase:POSition?")),
                "trig": 0.0,
+               "srate": 0.0,
                "ch": {}}
+        try:
+            out["srate"] = parse_float(q(":ACQuire:SRATe?"))   # 仪器内部采集率
+        except InstrumentError:
+            pass
         try:
             out["trig"] = parse_float(q(":TRIGger:LEVel?"))
         except InstrumentError:
@@ -987,7 +992,7 @@ class SimScope:
 
     def scales(self) -> dict:
         """模拟 1V/div、10ms/div, 与真实面板布局一致。"""
-        return {"tdiv": 0.01, "tpos": 0.0, "trig": 0.0,
+        return {"tdiv": 0.01, "tpos": 0.0, "trig": 0.0, "srate": 1e6,
                 "ch": {ch: {"vdiv": 0.5 if ch == 1 else 1.0,
                             "off": 0.0, "on": ch in self.ch}
                        for ch in (1, 2)}}
