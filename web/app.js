@@ -1285,7 +1285,7 @@ function fmtScopeV(v) {
 }
 
 function fmtScopeFreq(f) {
-  if (f == null || !isFinite(f) || f <= 0) return '—';
+  if (f == null || !isFinite(f) || f <= 0 || f > 1e30) return '—';
   if (f >= 1e6) return (f / 1e6).toFixed(2) + 'M';
   if (f >= 1e3) return (f / 1e3).toFixed(2) + 'k';
   return f.toFixed(2);
@@ -1299,6 +1299,7 @@ function scopePanelHtml(d) {
         <div class="spacer"></div>
         <button class="tiny" data-sact="run" title="开始采集">RUN</button>
         <button class="tiny" data-sact="stop" title="停止采集">STOP</button>
+        <button class="tiny ghost" data-sact="fit" title="纵轴按波形幅度自动适配（关闭则严格按仪器档位显示）">自适应</button>
         <button class="tiny ghost" data-sact="auto" title="自动设置量程与时基">Auto</button>
       </div>
 
@@ -1316,12 +1317,24 @@ function scopePanelHtml(d) {
       </div>
 
       <div class="scope-wave">
-        <canvas class="scope-canvas"></canvas>
+        <div class="scope-screen">
+          <canvas class="scope-canvas"></canvas>
+        </div>
         <div class="scope-empty">未连接 · 左侧选择「USB 直连」后点连接</div>
       </div>
 
+      <div class="scope-foot">
+        <span class="sf-item sf-run">—</span>
+        <span class="sf-item sf-tdiv">时基 —</span>
+        <span class="sf-item sf-trig">触发 —</span>
+        <span class="spacer"></span>
+        <span class="sf-item sf-pts">—</span>
+      </div>
+
       <p class="hint" style="margin:10px 0 0">
-        波形逐帧从设备抓取（约 1–2 Hz），读数取自示波器自动测量；点击通道卡片可开关显示。
+        波形逐帧从设备回读：仪器每次取数要等一次新采集（约 210ms，与点数无关），
+        因此双通道约 3.2 帧/秒、单通道约 3.7 帧/秒 —— 这是 USB 通路的物理上限，
+        仪器自身屏幕是内部直连，不经过这条通路。
       </p>`;
 }
 
@@ -1354,12 +1367,44 @@ function renderScopePanel(st, d) {
   const stopBtn = $('[data-sact="stop"]', sec);
   if (runBtn) runBtn.classList.toggle('sel', !!d.run && d.connected);
   if (stopBtn) stopBtn.classList.toggle('sel', !!d.connected && !d.run);
+
+  // 底部信息条: 采集状态 / 时基 / 触发电平 / 帧率
+  const sc = d.scope || {};
+  const fitOn = S.scopeFit !== false;
+  const fitBtn = $('[data-sact="fit"]', sec);
+  if (fitBtn) fitBtn.classList.toggle('sel', fitOn);
+  const setTxt = (sel, txt) => { const el = $(sel, sec); if (el) el.textContent = txt; };
+  setTxt('.sf-run', !d.connected ? '未连接'
+    : (d.run ? `RUN · ${(sc.fps || 0).toFixed(1)} 帧/秒` : 'STOP · 已冻结'));
+  setTxt('.sf-tdiv', sc.tdiv ? `时基 ${fmtTime(sc.tdiv)}/div` : '时基 —');
+  setTxt('.sf-trig', (d.connected && isFinite(sc.trig)) ? `触发 ${fmtDivV(sc.trig)}` : '触发 —');
+  const w1 = (d.wave || {})['ch1'], w2 = (d.wave || {})['ch2'];
+  const pts = Math.max(w1 ? w1.y.length : 0, w2 ? w2.y.length : 0);
+  setTxt('.sf-pts', (pts ? `显示 ${pts} 点 / 通道` : '') + (fitOn ? ' · 纵轴自适应' : ' · 按仪器档位'));
 }
 
 function renderScopeCurves(st) {
   const d = curDev();
   if (!d || d.role !== 'scope') return;
   drawScope(d);
+}
+
+function fmtTime(s) {
+  const a = Math.abs(s);
+  if (a < 1e-9) return '0s';
+  if (a >= 1) return s.toFixed(2) + 's';
+  if (a >= 1e-3) return (s * 1e3).toFixed(Math.abs(s * 1e3) >= 10 ? 0 : 1) + 'ms';
+  if (a >= 1e-6) return (s * 1e6).toFixed(0) + 'µs';
+  return (s * 1e9).toFixed(0) + 'ns';
+}
+
+/* 刻度标签: 每格电压值, 兼顾短标签与有效数字 */
+function fmtDivV(v) {
+  const a = Math.abs(v);
+  if (a < 1e-12) return '0';
+  if (a >= 1) return (Math.round(v * 100) / 100).toFixed(a >= 10 ? 1 : 2) + 'V';
+  if (a >= 1e-3) return (v * 1e3).toFixed(Math.abs(v * 1e3) >= 100 ? 0 : (Math.abs(v * 1e3) >= 10 ? 1 : 2)) + 'mV';
+  return (v * 1e6).toFixed(0) + 'µV';
 }
 
 function drawScope(d) {
@@ -1372,8 +1417,8 @@ function drawScope(d) {
   if (empty) empty.style.display = d.connected ? 'none' : '';
 
   const rect = wrap.getBoundingClientRect();
-  const W = Math.max(320, Math.floor(rect.width));
-  const H = Math.max(220, Math.floor(rect.height));
+  const W = Math.max(360, Math.round(rect.width));
+  const H = Math.max(240, Math.round(rect.height));
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
     cv.width = Math.round(W * dpr);
@@ -1387,89 +1432,192 @@ function drawScope(d) {
 
   const css = getComputedStyle(document.documentElement);
   const cGrid = css.getPropertyValue('--line-hi').trim() || '#2e4055';
+  const cMinor = css.getPropertyValue('--cell-line').trim() || '#1b2937';
   const cText = css.getPropertyValue('--dim-1').trim() || '#a7b7c8';
+  const cText2 = css.getPropertyValue('--dim-2').trim() || '#6d8093';
 
-  const padL = 62, padR = 16, padT = 14, padB = 30;
+  // 真实示波器栅格: 横向 10 格 × 纵向 8 格
+  const COLS = 10, ROWS = 8;
+  const padL = 58, padR = 58, padT = 22, padB = 24;
   const pw = W - padL - padR;
   const ph = H - padT - padB;
+  const cw = pw / COLS, chh = ph / ROWS;
+  const px = div => padL + pw / 2 + div * cw;      // 横向 -5..+5 格
+  const py = div => padT + ph / 2 - div * chh;     // 纵向 -4..+4 格
 
+  // 次网格: 每格 5 等分的点阵 (接近真机的点状标尺)
+  g.fillStyle = cMinor;
+  for (let i = 0; i <= COLS * 5; i++) {
+    if (i % 5 === 0) continue;
+    const x = Math.round(padL + (pw * i) / (COLS * 5));
+    for (let j = 0; j <= ROWS * 5; j++) {
+      if (j % 5 === 0) continue;
+      g.fillRect(x, Math.round(padT + (ph * j) / (ROWS * 5)), 1, 1);
+    }
+  }
+
+  // 主网格
   g.strokeStyle = cGrid;
-  g.globalAlpha = 0.55;
   g.lineWidth = 1;
-  for (let i = 0; i <= 10; i++) {
-    const x = Math.round(padL + pw * i / 10) + 0.5;
+  g.globalAlpha = 0.45;
+  for (let i = 0; i <= COLS; i++) {
+    const x = Math.round(padL + cw * i) + 0.5;
     g.beginPath(); g.moveTo(x, padT); g.lineTo(x, padT + ph); g.stroke();
   }
-  for (let j = 0; j <= 8; j++) {
-    const y = Math.round(padT + ph * j / 8) + 0.5;
+  for (let j = 0; j <= ROWS; j++) {
+    const y = Math.round(padT + chh * j) + 0.5;
     g.beginPath(); g.moveTo(padL, y); g.lineTo(padL + pw, y); g.stroke();
   }
+  // 中心十字轴 (触发点 / 0V 基准)
+  g.globalAlpha = 0.9;
+  const cx0 = Math.round(padL + pw / 2) + 0.5, cy0 = Math.round(padT + ph / 2) + 0.5;
+  g.beginPath(); g.moveTo(cx0, padT); g.lineTo(cx0, padT + ph); g.stroke();
+  g.beginPath(); g.moveTo(padL, cy0); g.lineTo(padL + pw, cy0); g.stroke();
   g.globalAlpha = 1;
 
   const wave = d.wave || {};
+  const sc = d.scope || {};
+  const tdiv = sc.tdiv > 0 ? sc.tdiv : 0;
   const chs = [1, 2].filter(ch => wave['ch' + ch] && wave['ch' + ch].y && wave['ch' + ch].y.length > 1);
-  g.font = '12px var(--mono)';
-  g.textAlign = 'center';
-  g.fillStyle = cText;
+
+  g.font = '11px "JetBrains Mono", Consolas, monospace';
   if (!chs.length) {
-    g.font = '13px var(--sans)';
-    g.fillText(d.connected ? (d.run ? '等待波形数据…' : '已停止采集（点 RUN 继续）') : '未连接', padL + pw / 2, padT + ph / 2);
+    g.fillStyle = cText;
+    g.textAlign = 'center';
+    g.fillText(d.connected ? (d.run ? '等待波形数据…' : '已停止采集（点 RUN 继续）')
+      : '未连接', padL + pw / 2, padT + ph / 2);
     return;
   }
 
-  let lo = Infinity, hi = -Infinity;
-  chs.forEach(ch => {
-    for (const v of wave['ch' + ch].y) { if (v < lo) lo = v; if (v > hi) hi = v; }
-  });
-  let span = hi - lo;
-  if (!isFinite(span) || span < 1e-9) { span = 1; lo -= 0.5; hi += 0.5; }
-  const margin = span * 0.1;
-  lo -= margin; hi += margin; span = hi - lo;
-
+  // 自适应: 按本帧数据幅度重算每格电压, 让波形铺满 8 格 (默认开)
+  const fit = S.scopeFit !== false;
+  const view = {};
   chs.forEach(ch => {
     const w = wave['ch' + ch];
     const ys = w.y;
+    let vdiv = w.vdiv > 0 ? w.vdiv : 0;
+    let off = w.off || 0;
+    if (fit && ys.length) {
+      // 用 0.5%–99.5% 分位定幅: 单个毛刺不会把整体压扁, 极值仍会被裁到边缘
+      const sorted = ys.slice().sort((a, b) => a - b);
+      const lo = sorted[Math.floor(sorted.length * 0.005)];
+      const hi = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.995))];
+      const span = Math.max(hi - lo, 1e-9);
+      vdiv = span / (ROWS * 0.9);         // 留一点上下余量
+      off = (hi + lo) / 2;
+    }
+    view[ch] = { y: ys, x0: w.x0 || 0, dx: w.dx || 0, vdiv, off };
+  });
+
+  // ---- 纵轴刻度: 左 = CH1, 右 = CH2 (各自独立 v/div) ----
+  const axes = [
+    { ch: 1, side: 'left' },
+    { ch: 2, side: 'right' },
+  ];
+  axes.forEach(ax => {
+    const vw = view[ax.ch];
+    if (!vw) return;
+    const vdiv = vw.vdiv > 0 ? vw.vdiv : 0;
+    if (!vdiv) return;
+    g.fillStyle = SCOPE_CH[ax.ch].color;
+    g.globalAlpha = 0.85;
+    g.textAlign = ax.side === 'left' ? 'right' : 'left';
+    const lx = ax.side === 'left' ? padL - 8 : padL + pw + 8;
+    for (let j = 0; j <= ROWS; j += 2) {
+      const v = vw.off + (ROWS / 2 - j) * vdiv;
+      g.fillText(fmtDivV(v), lx, padT + chh * j + 4);
+    }
+    g.globalAlpha = 1;
+    // 0V(通道偏置) 位置色标
+    const zd = py((0 - vw.off) / vdiv);
+    if (zd > padT - 1 && zd < padT + ph + 1) {
+      g.beginPath();
+      const ax0 = ax.side === 'left' ? padL : padL + pw;
+      const dir = ax.side === 'left' ? -1 : 1;
+      g.moveTo(ax0, zd);
+      g.lineTo(ax0 + dir * 5, zd - 4);
+      g.lineTo(ax0 + dir * 5, zd + 4);
+      g.closePath();
+      g.fill();
+    }
+  });
+
+  // ---- 横轴时间刻度 (相对触发点) ----
+  g.fillStyle = cText2;
+  g.textAlign = 'center';
+  for (let i = 0; i <= COLS; i += 2) {
+    if (!tdiv) break;
+    const t = (i - COLS / 2) * tdiv;
+    g.fillText(fmtTime(t), padL + cw * i, padT + ph + 16);
+  }
+
+  // ---- 波形 (按各自 v/div 与偏置换算成格数, 与真机一致) ----
+  g.save();
+  g.beginPath();
+  g.rect(padL, padT, pw, ph);
+  g.clip();
+  chs.forEach(ch => {
+    const vw = view[ch];
+    if (!vw || !(vw.vdiv > 0) || !tdiv) return;
+    const ys = vw.y;
     g.strokeStyle = SCOPE_CH[ch].color;
-    g.lineWidth = 1.5;
+    g.lineWidth = 1.25;
+    g.lineJoin = 'round';
     g.beginPath();
     for (let i = 0; i < ys.length; i++) {
-      const x = padL + pw * (i / (ys.length - 1));
-      const y = padT + ph * (1 - (ys[i] - lo) / span);
+      const x = px((vw.x0 + i * vw.dx) / tdiv);
+      const y = py((ys[i] - vw.off) / vw.vdiv);
       i ? g.lineTo(x, y) : g.moveTo(x, y);
     }
     g.stroke();
   });
 
-  // 纵轴 (V) 与横轴 (时间) 刻度
-  g.fillStyle = cText;
-  g.font = '11px var(--mono)';
-  g.textAlign = 'right';
-  for (let j = 0; j <= 8; j += 2) {
-    const v = hi - span * j / 8;
-    g.fillText(fmtScopeV(v), padL - 8, padT + ph * j / 8 + 4);
+  // 触发电平: 虚线 + 右侧三角
+  if (tdiv && isFinite(sc.trig) && view[1]) {
+    const w1 = view[1];
+    const vdiv1 = w1.vdiv > 0 ? w1.vdiv : 0;
+    if (vdiv1) {
+      const ty = py((sc.trig - w1.off) / vdiv1);
+      if (ty > padT && ty < padT + ph) {
+        g.save();
+        g.strokeStyle = SCOPE_CH[1].color;
+        g.globalAlpha = 0.5;
+        g.setLineDash([5, 4]);
+        g.lineWidth = 1;
+        g.beginPath(); g.moveTo(padL, ty); g.lineTo(padL + pw, ty); g.stroke();
+        g.restore();
+      }
+    }
   }
-  g.textAlign = 'center';
-  const w0 = wave['ch' + chs[0]];
-  const startMs = (w0.x0 || 0) * 1000;
-  const totalMs = w0.dx * Math.max(1, w0.y.length - 1) * 1000;
-  const fmtT = ms => (Math.abs(ms) >= 1000 ? (ms / 1000).toFixed(2) + 's' : ms.toFixed(1) + 'ms');
-  for (let i = 0; i <= 10; i += 2) {
-    g.fillText(fmtT(startMs + totalMs * i / 10), padL + pw * i / 10, padT + ph + 18);
-  }
+  g.restore();
 
-  // 图例
+  // ---- 角落读数 (像真机的 HUD) ----
   g.textAlign = 'left';
-  let lx = padL + 6;
+  g.font = '11px "JetBrains Mono", Consolas, monospace';
+  let hx = padL + 2;
   chs.forEach(ch => {
+    const vw = view[ch];
     g.fillStyle = SCOPE_CH[ch].color;
-    g.fillRect(lx, padT + 4, 10, 3);
-    g.fillStyle = cText;
-    g.fillText(' ' + SCOPE_CH[ch].name, lx + 12, padT + 8);
-    lx += 52;
+    g.fillText(`${SCOPE_CH[ch].name} ${fmtDivV(vw.vdiv || 0)}/div${fit ? ' *' : ''}`, hx, padT - 7);
+    hx += 122;
   });
+  g.fillStyle = cText2;
+  g.textAlign = 'right';
+  const fps = sc.fps ? `${sc.fps.toFixed(1)} 帧/秒` : '';
+  g.fillText(fps, padL + pw, padT - 7);
+
 }
 
 async function scopeAction(devId, action) {
+  if (action === 'fit') {
+    S.scopeFit = !(S.scopeFit !== false);
+    const sec = $('#view-' + devId);
+    const btn = sec && $('[data-sact="fit"]', sec);
+    if (btn) btn.classList.toggle('sel', S.scopeFit !== false);
+    const d = curDev();
+    if (d) drawScope(d);
+    return;
+  }
   try {
     const r = await api('/api/scope/action', { dev: devId, action });
     render(r);
@@ -1924,12 +2072,19 @@ async function manualCheckUpdate() {
 }
 
 async function tick() {
+  let delay = 700;
   try {
-    render(await api('/api/status'));
+    const st = await api('/api/status');
+    render(st);
+    // 正在看运行中的示波器 → 高频拉取, 别让 700ms 的状态轮询成为刷新瓶颈
+    const dev = curDev();
+    if (dev && dev.role === 'scope' && dev.connected && dev.run) {
+      delay = 100;
+    }
   } catch (e) {
     console.warn(e);
   }
-  setTimeout(tick, 700);
+  setTimeout(tick, delay);
 }
 
 /* ------------------------------------------------------------------ */

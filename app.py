@@ -93,6 +93,7 @@ class Dev:
         self.model = model
         self.name = name
         self.driver = None
+        self.io = threading.RLock()     # 设备 I/O 串行锁 (采集线程与界面操作共用)
         self.meta = {"connected": False, "sim": False, "port": "", "baud": 0, "idn": "", "error": ""}
         if role == "power":
             self.channels = {
@@ -106,7 +107,8 @@ class Dev:
             self.channels = {n: {"vpp": 0.0, "vavg": 0.0, "freq": 0.0, "on": n == 1}
                              for n in (1, 2)}
             self.range = None
-            self.state = {"run": True, "wave": {}}
+            self.state = {"run": True, "wave": {}, "fps": 0.0, "scales": {},
+                          "rot": 1, "meas_t": 0.0}
         else:
             self.channels = None
             spec = MODELS["load"].get(model) or MODELS["load"]["IT8511A+"]
@@ -121,12 +123,21 @@ class Dev:
             d["channels"] = self.channels
             d["run"] = self.state.get("run", True)
             d["wave"] = self._wave_payload()
+            sc = self.state.get("scales") or {}
+            d["scope"] = {
+                "tdiv": sc.get("tdiv", 0.0),
+                "tpos": sc.get("tpos", 0.0),
+                "trig": sc.get("trig", 0.0),
+                "fps": round(float(self.state.get("fps", 0.0)), 1),
+                "frame": int(self.state.get("frame") or 0),
+                "frame_ms": self.state.get("frame_ms", 0),
+            }
         else:
             d["range"] = self.range
             d.update(self.state)
         return d
 
-    def _wave_payload(self, max_points: int = 600) -> dict:
+    def _wave_payload(self, max_points: int = 1600) -> dict:
         """把最近一帧波形降采样到 ≤max_points 点后交给前端绘图。
 
         每个桶取最小/最大两点（包络），而不是简单抽点——否则高频噪声
@@ -134,6 +145,7 @@ class Dev:
         """
         out = {}
         per_ch = max(80, max_points // 2)
+        scales = (self.state.get("scales") or {}).get("ch") or {}
         for ch, w in (self.state.get("wave") or {}).items():
             ys = w.get("y") or []
             if not ys:
@@ -147,10 +159,13 @@ class Dev:
                     pts.extend((lo, hi))
                 else:
                     pts.extend((hi, lo))
+            meta = scales.get(ch) or scales.get(str(ch)) or {}
             out[f"ch{ch}"] = {
                 "y": [round(float(v), 4) for v in pts],
                 "x0": w.get("x0", 0.0),
                 "dx": w.get("dx", 0.0) * step,
+                "vdiv": meta.get("vdiv", 0.0),
+                "off": meta.get("off", 0.0),
             }
         return out
 
@@ -192,6 +207,9 @@ class Bench:
         self._scope_tick = 0
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._poll_thread.start()
+        # 示波器独立采集线程: 不受 0.8s 电源/负载轮询节拍限制, 有多少抓多少
+        self._scope_thread = threading.Thread(target=self._scope_loop, daemon=True)
+        self._scope_thread.start()
         # 启动 3 秒后联网检查更新（失败静默, 不影响使用）
         threading.Thread(target=self._check_update_delayed, daemon=True).start()
         # 默认清单：一台电源 + 一台负载 + 一台示波器（可再增删）
@@ -294,7 +312,13 @@ class Bench:
                                  "baud": 0, "idn": drv.idn, "error": ""})
                 dev.state["run"] = bool(getattr(drv, "running", True))
                 dev.state["wave"] = {}
-                self._scope_tick = 0
+                dev.state["fps"] = 0.0
+                dev.state["meas_t"] = 0.0
+                dev.state["rot"] = 1
+                try:
+                    dev.state["scales"] = drv.scales()
+                except InstrumentError:
+                    dev.state["scales"] = {}
                 self.log("ok", f"{dev.name}[{dev.model}] 已连接: {dev.meta['idn']} @ {dev.meta['port']}")
             else:
                 if sim:
@@ -790,11 +814,7 @@ class Bench:
                         except Exception as exc:  # noqa: BLE001
                             dev.meta["error"] = str(exc)
                 elif dev.role == "scope":
-                    try:
-                        self._poll_scope(dev)
-                        dev.meta["error"] = ""
-                    except Exception as exc:  # noqa: BLE001
-                        dev.meta["error"] = str(exc)
+                    continue          # 示波器由 _scope_loop 独立采集, 不占轮询节拍
                 else:
                     try:
                         v, i, p = dev.driver.measure()
@@ -817,26 +837,90 @@ class Bench:
                             nxt += step
                         rec["next_t"] = nxt
 
-    def _poll_scope(self, dev: Dev) -> None:
-        """示波器轮询: 每轮抓波形, 测量读数按通道交替刷新 (设备逐条测量约 0.2s/项)。"""
-        drv = dev.driver
-        wave = dev.state.setdefault("wave", {})
-        for ch in (1, 2):
-            if not dev.channels[ch].get("on"):
-                wave.pop(ch, None)
+    def _scope_loop(self) -> None:
+        """示波器采集循环: 能抓多快抓多快, 不做人为休眠。
+
+        实测: 设置类查询 1–2ms; :WAVeform:DATA? 固定约 210ms (设备在等一次
+        新采集, 与点数无关); 逐条 :MEASure:VPP? 也是 210ms/项, 但
+        :MEASure:RESults? 一次取回全部测量只需 75ms。
+        于是每帧 = 一次波形查询 (+ 每 0.7s 一次测量查询) ≈ 285ms,
+        两通道轮转时界面约 3.5 帧/秒, 单通道约 4.5 帧/秒。
+        """
+        while True:
+            if self._busy:
+                time.sleep(0.05)
                 continue
-            try:
-                wave[ch] = drv.waveform(ch)
-            except Exception:  # noqa: BLE001
-                wave.pop(ch, None)
-        self._scope_tick += 1
-        ch = 1 if self._scope_tick % 2 else 2
-        if dev.channels[ch].get("on"):
-            try:
-                dev.channels[ch].update(drv.measure(ch))
-            except Exception:  # noqa: BLE001
-                pass
-        dev.state["run"] = bool(getattr(drv, "running", True))
+            scopes = [d for d in list(self.devices.values())
+                      if d.role == "scope" and d.driver is not None]
+            if not scopes:
+                time.sleep(0.2)
+                continue
+            for dev in scopes:
+                try:
+                    self._scope_poll(dev)
+                except Exception as exc:  # noqa: BLE001
+                    with self.lock:
+                        dev.meta["error"] = str(exc)
+                    time.sleep(0.15)
+
+    def _scope_poll(self, dev: Dev) -> None:
+        drv = dev.driver
+        now = time.time()
+        t0 = time.perf_counter()
+        with dev.io:
+            sc = drv.scales()                 # 1–2ms/项, 每帧都取, 前面板改档立刻跟上
+            # 通道开关以仪器为准 (前面板按了也能同步过来)
+            onmap = sc.get("ch") or {}
+            for c in (1, 2):
+                if c in onmap:
+                    dev.channels[c]["on"] = bool(onmap[c].get("on"))
+            enabled = [c for c in (1, 2) if dev.channels[c].get("on")]
+            if not enabled:
+                with self.lock:
+                    dev.state["wave"] = {}
+                time.sleep(0.1)
+                return
+            if len(enabled) == 2:             # 两通道交替, 每帧只取一路
+                ch = enabled[0] if dev.state.get("rot") == 2 else enabled[1]
+                dev.state["rot"] = ch
+            else:
+                ch = enabled[0]
+            w = drv.waveform(ch)              # 约 210ms (设备等一次新采集)
+            meas = {}
+            if now - float(dev.state.get("meas_t") or 0) >= 1.2:
+                try:
+                    meas = drv.measurements()  # 约 75ms, 一次拿回全部测量
+                    dev.state["meas_t"] = time.time()
+                except InstrumentError:
+                    meas = {}
+        dt = max(1e-3, time.perf_counter() - t0)
+
+        with self.lock:
+            wave = dev.state.setdefault("wave", {})
+            wave[ch] = w
+            for c in (1, 2):
+                if not dev.channels[c].get("on"):
+                    wave.pop(c, None)
+                    continue
+                m = meas.get(c) or meas.get(str(c)) or {}
+                if "vpp" in m:
+                    dev.channels[c]["vpp"] = m["vpp"]
+                if "freq" in m:
+                    dev.channels[c]["freq"] = m["freq"]
+            # Vavg 用本帧数据求均值: 只有 4 个测量槽位, 且这样与画出的曲线一致
+            ys = w.get("y") or []
+            if ys:
+                dev.channels[ch]["vavg"] = sum(ys) / len(ys)
+                if "vpp" not in (meas.get(ch) or {}):
+                    dev.channels[ch]["vpp"] = max(ys) - min(ys)
+            dev.state["scales"] = sc
+            dev.state["run"] = bool(getattr(drv, "running", True))
+            dev.state["frame"] = int(dev.state.get("frame") or 0) + 1
+            dev.state["frame_ms"] = round(dt * 1000, 1)
+            fps = 1.0 / dt
+            prev = float(dev.state.get("fps") or 0.0)
+            dev.state["fps"] = fps if prev <= 0 else prev * 0.65 + fps * 0.35
+            dev.meta["error"] = ""
 
     def scope_action(self, dev_id: str, action: str) -> dict:
         """示波器操作: run / stop / single / auto / ch1 / ch2 (通道开关)。"""
@@ -846,7 +930,9 @@ class Bench:
                 raise InstrumentError("该设备不是示波器")
             if dev.driver is None:
                 raise InstrumentError(f"{dev.name} 未连接")
-            drv = dev.driver
+        drv = dev.driver
+        # 采集线程与界面操作共用同一条 USB 链路, 必须串行
+        with dev.io:
             if action == "run":
                 drv.run()
                 self.log("info", f"{dev.name} 开始采集")
@@ -859,14 +945,22 @@ class Bench:
             elif action == "auto":
                 self.log("info", f"{dev.name} 自动设置 (Auto Setup)…")
                 drv.autoscale()
+                self.log("info", f"{dev.name} 自动设置完成")
             elif action in ("ch1", "ch2"):
                 ch = int(action[-1])
                 on = not bool(dev.channels[ch].get("on"))
                 drv.set_channel(ch, on)
                 dev.channels[ch]["on"] = on
+                if not on:
+                    dev.state.get("wave", {}).pop(ch, None)
                 self.log("info", f"{dev.name} CH{ch} {'开启' if on else '关闭'}")
             else:
                 raise InstrumentError(f"未知示波器操作: {action}")
+            try:
+                dev.state["scales"] = drv.scales()   # 立即刷新档位显示
+            except InstrumentError:
+                pass
+        with self.lock:
             dev.state["run"] = bool(getattr(drv, "running", True))
             return self.snapshot()
 

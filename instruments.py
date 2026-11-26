@@ -717,6 +717,8 @@ class DSOX1102G:
     VID = 0x2A8D
     PID = 0x1797
     MAX_POINTS = 2000                 # 屏幕显示用点数 (数据量小 → 刷新快)
+    PRE_TTL = 8.0                     # 波形元信息有效期 (秒), 到期或时基变化时重取
+    MEAS_SLOTS = 4                    # 1000X 同时最多 4 项自动测量
 
     @classmethod
     def parse_port(cls, port: str) -> tuple[int, int]:
@@ -744,8 +746,10 @@ class DSOX1102G:
         # 本次第一条查询误读, 必须先冲洗干净再取 *IDN?
         self.idn = self._read_idn()
         self.running = True
-        self._pre = None              # 波形元信息缓存 (xinc/xorig/yinc/yorig)
+        self._pre: dict[int, dict] = {}   # 每通道波形元信息缓存 (元信息查询要 200ms)
         self._wave_ch = 0
+        self._last_tdiv = 0.0             # 最近一次时基, 用于感知前面板改档
+        self._meas_ready = False
         try:
             self.link.write(":WAVeform:FORMat BYTE")
             self.link.write(":WAVeform:MODE NORMal")
@@ -753,6 +757,10 @@ class DSOX1102G:
         except InstrumentError:
             pass
         self._drain_errors()
+        try:
+            self.setup_measurements()
+        except InstrumentError:
+            pass
 
     def _drain_errors(self) -> None:
         """读空设备错误队列, 避免上一次会话的旧错误干扰自检显示。"""
@@ -799,11 +807,68 @@ class DSOX1102G:
     def autoscale(self) -> None:
         self.link.write(":AUToscale")
         time.sleep(1.2)               # 自动设置需要几帧稳定
-        self._pre = None
+        self._pre.clear()
+        self.setup_measurements()     # 自动设置会清空原有测量项
 
     # ---------- 测量 ----------
+    def setup_measurements(self) -> None:
+        """预置 4 个自动测量槽位 (1000X 同时最多 4 项)。
+
+        之后用 :MEASure:RESults? 一次取回全部结果 (实测约 75ms);
+        而逐条 :MEASure:VPP? 每次要约 210ms —— 设备要等一次新采集。
+        """
+        self.link.write(":MEASure:CLEar")
+        for ch in (1, 2):
+            self.link.write(f":MEASure:VPP CHANnel{ch}")
+            self.link.write(f":MEASure:FREQuency CHANnel{ch}")
+        self._meas_ready = True
+
+    def measurements(self) -> dict:
+        """一次读回全部测量项: {1: {'vpp':…, 'freq':…}, 2: {...}}。"""
+        if not self._meas_ready:
+            self.setup_measurements()
+        raw = self.link.query(":MEASure:RESults?")
+        out: dict[int, dict] = {1: {}, 2: {}}
+        items = [s.strip() for s in raw.replace("\n", ",").split(",") if s.strip()]
+        for i in range(0, len(items) - 1, 2):
+            name, val = items[i], items[i + 1]
+            mt = re.search(r"\((\d)\)", name)
+            ch = int(mt.group(1)) if mt else 1
+            low = name.lower()
+            key = ("vpp" if "pk-pk" in low else
+                   "freq" if "frequ" in low else
+                   "vavg" if "average" in low else None)
+            if key is None:
+                continue
+            v = parse_float(val)
+            if abs(v) >= 1e30:        # 9.9E+37 = 该通道测不出此项
+                v = 0.0
+            out.setdefault(ch, {})[key] = v
+        return out
+
+    def scales(self) -> dict:
+        """读档位信息 (设置类查询 1–2ms, 可每帧调用)。"""
+        q = self.link.query
+        tdiv = parse_float(q(":TIMebase:SCALe?"))
+        self._last_tdiv = tdiv
+        out = {"tdiv": tdiv,
+               "tpos": parse_float(q(":TIMebase:POSition?")),
+               "trig": 0.0,
+               "ch": {}}
+        try:
+            out["trig"] = parse_float(q(":TRIGger:LEVel?"))
+        except InstrumentError:
+            pass
+        for ch in (1, 2):
+            out["ch"][ch] = {
+                "vdiv": parse_float(q(f":CHANnel{ch}:SCALe?")),
+                "off": parse_float(q(f":CHANnel{ch}:OFFSet?")),
+                "on": parse_float(q(f":CHANnel{ch}:DISPlay?")) > 0.5,
+            }
+        return out
+
     def measure(self, ch: int = 1) -> dict:
-        """一次往返取三项测量 (设备内部逐条测量, 约 0.6s)。"""
+        """兼容旧接口: 逐条查询三项测量 (较慢, 约 0.6s)。"""
         cmd = (f":MEASure:VPP? CHANnel{ch};"
                f":MEASure:VAVerage? CHANnel{ch};"
                f":MEASure:FREQuency? CHANnel{ch}")
@@ -824,20 +889,34 @@ class DSOX1102G:
         self.link.write(f":CHANnel{ch}:DISPlay {'ON' if on else 'OFF'}")
 
     # ---------- 波形 ----------
+    def _fetch_preamble(self, ch: int) -> dict:
+        pre = self.link.query(":WAVeform:PREamble?")
+        vals = [parse_float(v) for v in pre.split(",")]
+        if len(vals) < 10:
+            raise InstrumentError(f"波形元信息异常: {pre[:60]!r}")
+        meta = {"dx": vals[4], "x0": vals[5],
+                "dy": vals[7], "y0": vals[8], "yref": vals[9],
+                "points": int(vals[2]), "t": time.time(),
+                "tdiv": self._last_tdiv}
+        self._pre[ch] = meta
+        return meta
+
     def waveform(self, ch: int = 1) -> dict:
-        """抓一帧波形: 返回 {'y': [...], 'x0': s, 'dx': s/点, 'tb': s/div}。"""
+        """抓一帧波形: 返回 {'y': [...], 'x0': s, 'dx': s/点}。
+
+        元信息按通道缓存, 稳态下每帧只有一次 :WAVeform:DATA? 查询 (约 210ms,
+        设备在等一次新采集), 这是 USB 通路的物理下限。
+        """
         if ch != self._wave_ch:
             self.link.write(f":WAVeform:SOURce CHANnel{ch}")
             self._wave_ch = ch
-            self._pre = None
-        if self._pre is None:
-            pre = self.link.query(":WAVeform:PREamble?")
-            vals = [parse_float(v) for v in pre.split(",")]
-            # format,type,points,count,xincrement,xorigin,xreference,
-            # yincrement,yorigin,yreference
-            self._pre = {"dx": vals[4], "x0": vals[5],
-                         "dy": vals[7], "y0": vals[8], "yref": vals[9]}
-        pre = self._pre
+        pre = self._pre.get(ch)
+        # 时基被前面板/自动设置改动 → 缓存的增量失效, 重新读元信息
+        if pre is not None and self._last_tdiv and \
+                abs(pre["tdiv"] - self._last_tdiv) > 1e-12:
+            pre = None
+        if pre is None or (time.time() - pre["t"]) > self.PRE_TTL:
+            pre = self._fetch_preamble(ch)
         raw = self.link.query_raw(":WAVeform:DATA?")
         if raw[:1] != b"#":
             raise InstrumentError(f"波形数据格式异常: {raw[:24]!r}")
@@ -902,6 +981,19 @@ class SimScope:
         return {"vpp": round(c["amp"] * 2 * jitter, 4),
                 "vavg": round(self._rng.uniform(-0.01, 0.01), 4),
                 "freq": round(c["freq"] * jitter, 1)}
+
+    def measurements(self) -> dict:
+        return {ch: self.measure(ch) for ch in (1, 2)}
+
+    def scales(self) -> dict:
+        """模拟 1V/div、10ms/div, 与真实面板布局一致。"""
+        return {"tdiv": 0.01, "tpos": 0.0, "trig": 0.0,
+                "ch": {ch: {"vdiv": 0.5 if ch == 1 else 1.0,
+                            "off": 0.0, "on": ch in self.ch}
+                       for ch in (1, 2)}}
+
+    def setup_measurements(self) -> None:
+        pass
 
     def waveform(self, ch: int = 1) -> dict:
         import math
