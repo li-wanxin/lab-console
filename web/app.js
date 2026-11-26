@@ -1482,10 +1482,11 @@ function drawScope(d) {
 
   g.font = '11px "JetBrains Mono", Consolas, monospace';
   if (!chs.length) {
+    if (!d.connected) return;             // 未连接的提示交给 DOM 遮罩, 避免重复
     g.fillStyle = cText;
     g.textAlign = 'center';
-    g.fillText(d.connected ? (d.run ? '等待波形数据…' : '已停止采集（点 RUN 继续）')
-      : '未连接', padL + pw / 2, padT + ph / 2);
+    g.fillText(d.run ? '等待波形数据…' : '已停止采集（点 RUN 继续）',
+      padL + pw / 2, padT + ph / 2);
     return;
   }
 
@@ -2306,6 +2307,7 @@ function renderRecordings(st) {
     const sec = $('#view-' + d.id);
     if (!sec) return;
     const bar = $('.rec-bar', sec);
+    if (!bar) return;                // 示波器面板没有记录条 (不支持记录导出)
     const list = recs.filter(r => r.dev === d.id);
     const pends = pendings.filter(r => r.dev === d.id);
     // 负载只有一路：记录中直接隐藏「开始记录」按钮，防止重复开启
