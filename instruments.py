@@ -716,7 +716,7 @@ class DSOX1102G:
 
     VID = 0x2A8D
     PID = 0x1797
-    MAX_POINTS = 2000                 # 屏幕显示用点数 (数据量小 → 刷新快)
+    MAX_POINTS = 100000               # 请求点数; 实测运行中给 62500 点, 停采给 100000 点
     PRE_TTL = 8.0                     # 波形元信息有效期 (秒), 到期或时基变化时重取
     MEAS_SLOTS = 4                    # 1000X 同时最多 4 项自动测量
 
@@ -752,7 +752,9 @@ class DSOX1102G:
         self._meas_ready = False
         try:
             self.link.write(":WAVeform:FORMat BYTE")
-            self.link.write(":WAVeform:MODE NORMal")
+            # 点数模式用 MAXimum: 运行中取"测量记录"(实测 62500 点, 32ns/点),
+            # 停采后取"原始采集记录"(最多 10 万点, 20ns/点), 读取代价几乎不变。
+            self.link.write(":WAVeform:POINts:MODE MAXimum")
             self.link.write(f":WAVeform:POINts {self.MAX_POINTS}")
         except InstrumentError:
             pass
@@ -795,14 +797,17 @@ class DSOX1102G:
     def run(self) -> None:
         self.link.write(":RUN")
         self.running = True
+        self._pre.clear()             # 记录长度变了, 增量/点数缓存作废
 
     def stop(self) -> None:
         self.link.write(":STOP")
         self.running = False
+        self._pre.clear()
 
     def single(self) -> None:
         self.link.write(":SINGle")
         self.running = False
+        self._pre.clear()
 
     def autoscale(self) -> None:
         self.link.write(":AUToscale")
@@ -929,7 +934,32 @@ class DSOX1102G:
         n = int(raw[2:2 + nd])
         data = raw[2 + nd:2 + nd + n]
         # BYTE 格式: 电压 = (原始值 - yreference) * yincrement + yorigin
-        ys = [(b - pre["yref"]) * pre["dy"] + pre["y0"] for b in data]
+        # 0x00 表示"空点"(该位置未采集到数据), 用相邻点线性补洞, 避免画成 0V
+        ys: list[float] = []
+        holes: list[int] = []
+        for b in data:
+            if b == 0:
+                holes.append(len(ys))
+                ys.append(float("nan"))
+            else:
+                ys.append((b - pre["yref"]) * pre["dy"] + pre["y0"])
+        for i in holes:
+            j = i - 1
+            while j >= 0 and ys[j] != ys[j]:
+                j -= 1
+            k = i + 1
+            while k < len(ys) and ys[k] != ys[k]:
+                k += 1
+            lo = ys[j] if j >= 0 else None
+            hi = ys[k] if k < len(ys) else None
+            if lo is None and hi is None:
+                ys[i] = 0.0
+            elif lo is None:
+                ys[i] = hi
+            elif hi is None:
+                ys[i] = lo
+            else:
+                ys[i] = lo + (hi - lo) * (i - j) / (k - j)
         return {"y": ys, "x0": pre["x0"], "dx": pre["dx"]}
 
     def raw_query(self, cmd: str) -> str:

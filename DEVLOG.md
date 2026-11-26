@@ -269,3 +269,22 @@ python desktop.py                        # 桌面壳（pywebview 原生窗口）
 
 **效果**: 双通道 3.2 帧/秒、单通道 3.7 帧/秒 (原来约 0.4 帧/秒)。
 上限来自仪器每次取数要等一次新采集，仪器自身屏幕是内部直连，不走这条通路。
+
+## 按官方编程指南修正波形取数 (2026-11-27)
+
+资料来源: Keysight《Programmer's Guide for InfiniiVision 1000 X-Series
+Oscilloscopes》9018-07554（934 页，已存工作区 docs/guide.pdf）。
+
+**关键条款**:
+- 点数模式命令是 `:WAVeform:POINts:MODE {NORMal|MAXimum|RAW}`，
+  不是 `:WAVeform:MODE`（之前写错，静默无效，一直只能拿 1953 点）。
+- NORMal = 测量记录（屏幕表示，约 2000 点）；MAXimum = 两者取大；
+  RAW = 原始采集记录，**只有停采时可用**。
+- MAXimum/RAW 最多回读 10 万点；NORMal 只允许 100/250/500/1000 或最大。
+- `:MEASure:RESults?` 最多 4 个连续测量，逗号分隔（固件 01.20 还带名称/通道）。
+- BYTE 数据里 0x00=空点(未采集到)、0x01=削底、0xFF=削顶。
+- 1000X 分段存储需 SGM 许可证；本机 `:ACQuire:MODE?` 返回 RTIM，无分段。
+
+**实测**: 运行中 POINts:MODE MAXimum + POINts 100000 → 实际 62500 点
+(32ns/点 = 31.2 MSa/s)，单帧 200ms、快档 4.4 帧/秒；停采后 100000 点
+(20ns/点 = 50 MSa/s)，读 10 万点仅 0.11s。回读采样率因此从 0.98 提到 31.2 MSa/s。
